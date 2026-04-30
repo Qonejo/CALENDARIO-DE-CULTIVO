@@ -81,6 +81,13 @@ int offsetVer = 0;
 bool vistaCfg = false;
 bool necesitaRedibujar = true;
 
+// ===== RED =====
+bool wifiConectado = false;
+unsigned long ultimoIntentoNtpMs = 0;
+
+const long GMT_OFFSET_SEC = -21600;
+const int DAYLIGHT_OFFSET_SEC = 0;
+
 // ===== MESES =====
 const char* MESES[] = {
 "Ene","Feb","Mar","Abr","May","Jun",
@@ -100,10 +107,10 @@ const char* DIA_SEM[] = {
 #define CARD_Y1 78  // Tarjeta central (Día actual) - No interactiva en tu código
 #define CARD_Y2 148 // Tarjeta inferior (Día siguiente)
 
-#define CFG_X 210
-#define CFG_Y 190
-#define CFG_W 95
-#define CFG_H 35
+#define CFG_X 255   // Esquina superior derecha
+#define CFG_Y 6
+#define CFG_W 58
+#define CFG_H 24
 
 // ================================================================
 //  TOUCH NORMALIZADO (CON MODO DEBUG PARA CALIBRACIÓN)
@@ -175,8 +182,9 @@ InfoCultivo calcularCultivo(int d, int m, int a)
   time_t tFecha = mktime(&td);
 
   struct tm* infoFecha = localtime(&tFecha);
+  int diaSemana = infoFecha ? infoFecha->tm_wday : 0;
 
-  r.tocaFertilizar = (infoFecha->tm_wday == 0); // Fertilizar cada Domingo
+  r.tocaFertilizar = (diaSemana == 0); // Fertilizar cada Domingo
 
   int diasVida = (tFecha > fechaBroteUnix) ?
                  (int)((tFecha - fechaBroteUnix) / 86400) : 0; // 86400 segundos en un día
@@ -209,7 +217,7 @@ InfoCultivo calcularCultivo(int d, int m, int a)
     inicioFase = diaInicioVeg;
     finFase = diaInicioFlor;
 
-    diasRel = diasVida;
+    diasRel = diasVida - diaInicioVeg;
   }
   else
   {
@@ -243,7 +251,8 @@ InfoCultivo calcularCultivo(int d, int m, int a)
     }
   }
 
-  float prog = (float)(diasRel - inicioFase) / (finFase - inicioFase);
+  int rango = max(1, finFase - inicioFase);
+  float prog = (float)(diasRel - inicioFase) / rango;
   prog = constrain(prog, 0, 1); // Asegura que el progreso esté entre 0 y 1
 
   r.progreso = prog;
@@ -363,11 +372,59 @@ void dibujarCalendario()
   tft.drawRect(168, 160, 140, 14, MI_GRIS); // Borde de la barra
   tft.fillRect(170, 162, (int)(136 * cult.progreso), 10, cult.colorFase); // Relleno de la barra
 
-  // Botón de Configuración
-  tft.drawRect(CFG_X, CFG_Y, CFG_W, CFG_H, MI_NARANJA); // Borde del botón
-  tft.setCursor(CFG_X + 30, CFG_Y + 12);
+  // Botón de Configuración (esquina superior derecha)
+  tft.drawRoundRect(CFG_X, CFG_Y, CFG_W, CFG_H, 4, MI_NARANJA);
+  tft.setTextSize(1);
   tft.setTextColor(MI_NARANJA);
+  tft.setCursor(CFG_X + 8, CFG_Y + 8);
   tft.print("CONFIG");
+}
+
+void dibujarConfiguracion()
+{
+  tft.fillScreen(MI_NEGRO);
+  tft.setTextColor(MI_BLANCO);
+  tft.setTextSize(2);
+  tft.setCursor(10, 12);
+  tft.print("CONFIGURACION");
+
+  tft.setTextSize(1);
+  tft.setCursor(10, 48);
+  tft.print("WiFi:");
+  tft.setTextColor(wifiConectado ? MI_VERDE : MI_ROJO);
+  tft.setCursor(50, 48);
+  tft.print(wifiConectado ? "Conectado" : "Sin conexion");
+
+  tft.setTextColor(MI_BLANCO);
+  tft.setCursor(10, 66);
+  tft.print("Offset dia visible:");
+  tft.setCursor(120, 66);
+  tft.printf("%d", offsetVer);
+
+  tft.setCursor(10, 84);
+  tft.print("Inicio VEG:");
+  tft.setCursor(120, 84);
+  tft.printf("dia %d", diaInicioVeg);
+
+  tft.setCursor(10, 102);
+  tft.print("Inicio FLOR:");
+  tft.setCursor(120, 102);
+  tft.printf("dia %d", diaInicioFlor);
+
+  tft.drawRoundRect(10, 200, 100, 30, 4, MI_NARANJA);
+  tft.setTextColor(MI_NARANJA);
+  tft.setCursor(36, 210);
+  tft.print("VOLVER");
+
+  tft.setTextColor(MI_GRIS);
+  tft.setCursor(10, 128);
+  tft.print("Opciones:");
+  tft.setCursor(10, 142);
+  tft.print("- Ver estado WiFi");
+  tft.setCursor(10, 154);
+  tft.print("- Ver offset de dia");
+  tft.setCursor(10, 166);
+  tft.print("- Revisar inicio VEG/FLOR");
 }
 
 // ================================================================
@@ -396,16 +453,25 @@ void setup()
   Serial.print("Conectando a WiFi ");
   Serial.println(SSID);
   WiFi.begin(SSID, PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
+  unsigned long inicioIntento = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - inicioIntento) < 15000) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWiFi conectado!");
+  wifiConectado = (WiFi.status() == WL_CONNECTED);
+  if (wifiConectado) {
+    Serial.println("\nWiFi conectado!");
+  } else {
+    Serial.println("\nNo se pudo conectar a WiFi, continuando sin NTP.");
+  }
 
-  configTime(-21600, 0, "pool.ntp.org", "time.nist.gov");
+  if (wifiConectado) {
+    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, "pool.ntp.org", "time.nist.gov");
+    ultimoIntentoNtpMs = millis();
+  }
 
   struct tm ti;
-  if (getLocalTime(&ti))
+  if (wifiConectado && getLocalTime(&ti))
   {
     diaHoy = ti.tm_mday;
     mesHoy = ti.tm_mon;
@@ -427,8 +493,31 @@ void setup()
 // ================================================================
 //  LOOP
 // ================================================================
+void actualizarFechaSiEsPosible()
+{
+  // Reintenta NTP cada 10 minutos si hay WiFi y aún no se obtuvo hora válida.
+  if (!wifiConectado) return;
+
+  struct tm ti;
+  if (getLocalTime(&ti, 50))
+  {
+    diaHoy = ti.tm_mday;
+    mesHoy = ti.tm_mon;
+    anioHoy = 1900 + ti.tm_year;
+    return;
+  }
+
+  if (millis() - ultimoIntentoNtpMs > 600000UL)
+  {
+    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, "pool.ntp.org", "time.nist.gov");
+    ultimoIntentoNtpMs = millis();
+  }
+}
+
 void loop()
 {
+  actualizarFechaSiEsPosible();
+
   int tx, ty;
 
   // Solo procesa el toque si no estamos en modo DEBUG_TOUCH_RAW
@@ -470,7 +559,11 @@ void loop()
 
   if (necesitaRedibujar)
   {
-    dibujarCalendario();
+    if (vistaCfg) {
+      dibujarConfiguracion();
+    } else {
+      dibujarCalendario();
+    }
     necesitaRedibujar = false;
   }
 }
