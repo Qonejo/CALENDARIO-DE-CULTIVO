@@ -84,6 +84,7 @@ bool necesitaRedibujar = true;
 // ===== RED =====
 bool wifiConectado = false;
 unsigned long ultimoIntentoNtpMs = 0;
+unsigned long ultimoIntentoWifiMs = 0;
 
 const long GMT_OFFSET_SEC = -21600;
 const int DAYLIGHT_OFFSET_SEC = 0;
@@ -97,6 +98,23 @@ const char* MESES[] = {
 const char* DIA_SEM[] = {
 "Dom","Lun","Mar","Mie","Jue","Vie","Sab"
 };
+
+int mesDesdeTexto(const char* m)
+{
+  if      (strcmp(m, "Jan") == 0) return 0;
+  else if (strcmp(m, "Feb") == 0) return 1;
+  else if (strcmp(m, "Mar") == 0) return 2;
+  else if (strcmp(m, "Apr") == 0) return 3;
+  else if (strcmp(m, "May") == 0) return 4;
+  else if (strcmp(m, "Jun") == 0) return 5;
+  else if (strcmp(m, "Jul") == 0) return 6;
+  else if (strcmp(m, "Aug") == 0) return 7;
+  else if (strcmp(m, "Sep") == 0) return 8;
+  else if (strcmp(m, "Oct") == 0) return 9;
+  else if (strcmp(m, "Nov") == 0) return 10;
+  else if (strcmp(m, "Dec") == 0) return 11;
+  return 0;
+}
 
 // ===== HITBOXES (Áreas de toque definidas) =====
 #define CARD_X 4
@@ -299,7 +317,8 @@ void dibujarCalendario()
     t.tm_mon = m;
     t.tm_year = a - 1900;
     time_t tiempo = mktime(&t); // Obtiene el tiempo UNIX para calcular el día de la semana
-    int diaSem = localtime(&tiempo)->tm_wday; // 0=Domingo, 6=Sábado
+    struct tm* infoDia = localtime(&tiempo);
+    int diaSem = infoDia ? infoDia->tm_wday : 0; // 0=Domingo, 6=Sábado
 
     bool foco = (i == 0); // La tarjeta del día central está en foco
 
@@ -481,10 +500,22 @@ void setup()
   }
   else
   {
-    Serial.println("Error al obtener la hora del NTP. Usando valores por defecto o la última hora conocida.");
-    diaHoy = 1;
-    mesHoy = 0; // Enero
-    anioHoy = 2024;
+    Serial.println("Error al obtener la hora del NTP. Usando fecha de compilacion como respaldo.");
+    char mesTxt[4] = {0};
+    int diaComp = 1;
+    int anioComp = 2024;
+    if (sscanf(__DATE__, "%3s %d %d", mesTxt, &diaComp, &anioComp) == 3)
+    {
+      diaHoy = diaComp;
+      mesHoy = mesDesdeTexto(mesTxt);
+      anioHoy = anioComp;
+    }
+    else
+    {
+      diaHoy = 1;
+      mesHoy = 0; // Enero
+      anioHoy = 2024;
+    }
   }
 
   necesitaRedibujar = true;
@@ -495,8 +526,19 @@ void setup()
 // ================================================================
 void actualizarFechaSiEsPosible()
 {
-  // Reintenta NTP cada 10 minutos si hay WiFi y aún no se obtuvo hora válida.
-  if (!wifiConectado) return;
+  // Si se perdió WiFi, reintenta conexión cada 30 segundos.
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    wifiConectado = false;
+    if (millis() - ultimoIntentoWifiMs > 30000UL)
+    {
+      WiFi.begin(SSID, PASSWORD);
+      ultimoIntentoWifiMs = millis();
+    }
+    return;
+  }
+
+  wifiConectado = true;
 
   struct tm ti;
   if (getLocalTime(&ti, 50))
