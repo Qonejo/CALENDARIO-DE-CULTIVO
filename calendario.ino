@@ -33,10 +33,10 @@
 // ¡IMPORTANTE! Estos valores son CRUCIALES para una calibración correcta de TU pantalla.
 // Si el toque sigue desalineado, deberás ajustar estos valores usando el modo DEBUG_TOUCH_RAW.
 // Los valores aquí son solo un punto de partida común.
-#define TS_MINX 300   // <- ACTUALIZA ESTOS VALORES CON LOS QUE OBTENGAS EN LA CALIBRACIÓN
-#define TS_MAXX 3800  // <- ACTUALIZA ESTOS VALORES CON LOS QUE OBTENGAS EN LA CALIBRACIÓN
-#define TS_MINY 250   // <- ACTUALIZA ESTOS VALORES CON LOS QUE OBTENGAS EN LA CALIBRACIÓN
-#define TS_MAXY 3850  // <- ACTUALIZA ESTOS VALORES CON LOS QUE OBTENGAS EN LA CALIBRACIÓN
+#define TS_MINX 200
+#define TS_MAXX 3900
+#define TS_MINY 200
+#define TS_MAXY 3900
 
 // ===== COLORES =====
 #define MI_NEGRO    0x0000 // Negro
@@ -135,54 +135,60 @@ int mesDesdeTexto(const char* m)
 // ================================================================
 bool leerTouch(int &tx, int &ty)
 {
-  if (!ts.touched()) return false;
+  static unsigned long ultimoTouch = 0;
+
+  if (!ts.touched())
+    return false;
+
+  // Anti rebote
+  if (millis() - ultimoTouch < 250)
+    return false;
+
+  ultimoTouch = millis();
 
   TS_Point p = ts.getPoint();
 
-  // Filtrar toques fuera de un rango de presión razonable (ruido o toques muy suaves)
-  if (p.z < 200 || p.z > 4000) return false;
+  // Filtrado de presión
+  if (p.z < 200 || p.z > 4000)
+    return false;
 
-  #ifdef DEBUG_TOUCH_RAW
-    // --- MODO DEPURACIÓN: Muestra los valores RAW del touch ---
-    // Usa estos valores para actualizar TS_MINX, TS_MAXX, TS_MINY, TS_MAXY
-    Serial.printf("RAW TOUCH: P.x:%d P.y:%d P.z:%d\n", p.x, p.y, p.z);
-    delay(150); // Pequeño delay para estabilizar la lectura y evitar spam en el Serial Monitor
-    return false; // En modo depuración, no queremos que el touch active nada
-  #else
-    // --- Mapeo CORREGIDO para una pantalla ST7789 de 240x320 rotada a paisaje (320x240 lógica) ---
-    // Ajusta la lógica de map() aquí si los ejes están invertidos o cambiados para tu pantalla.
-    // Prueba con las 4 opciones explicadas en el procedimiento de calibración.
+#ifdef DEBUG_TOUCH_RAW
 
-    // Opción 1 (La más común): p.y del sensor a X de la pantalla, p.x del sensor a Y de la pantalla (invertido)
-    tx = map(p.y, TS_MINY, TS_MAXY, 0, 320); // Mapea p.y (sensor) a tx (pantalla)
-    ty = map(p.x, TS_MAXX, TS_MINX, 0, 240); // Mapea p.x (sensor) a ty (pantalla), invertido
+  Serial.printf(
+    "RAW TOUCH: P.x:%d P.y:%d P.z:%d\n",
+    p.x, p.y, p.z
+  );
 
-    // --- POSIBLES ALTERNATIVAS SI LA OPCIÓN 1 NO FUNCIONA ---
-    // Descomenta y prueba una de estas a la vez después de ajustar TS_MIN/MAX:
-    // Opción 2: p.y a X, p.x a Y (sin inversión en Y)
-    // tx = map(p.y, TS_MINY, TS_MAXY, 0, 320);
-    // ty = map(p.x, TS_MINX, TS_MAXX, 0, 240);
+  delay(120);
 
-    // Opción 3: p.x a X, p.y a Y (invertido en Y)
-    // tx = map(p.x, TS_MINX, TS_MAXX, 0, 320);
-    // ty = map(p.y, TS_MAXY, TS_MINY, 0, 240);
+  return false;
 
-    // Opción 4: p.x a X, p.y a Y (sin inversión en Y)
-    // tx = map(p.x, TS_MINX, TS_MAXX, 0, 320);
-    // ty = map(p.y, TS_MINY, TS_MAXY, 0, 240);
+#else
 
-    // Si alguna dirección se siente invertida, puedes invertir el rango de destino (ej. 320, 0 en lugar de 0, 320)
-    // o invertir el rango de origen (ej. TS_MAX, TS_MIN en lugar de TS_MIN, TS_MAX).
+  // MAPEO PRINCIPAL
+  tx = map(p.x, TS_MINX, TS_MAXX, 0, 320);
+  ty = map(p.y, TS_MINY, TS_MAXY, 0, 240);
 
+  // OPCIONES ALTERNATIVAS
+  // tx = map(p.y, TS_MINY, TS_MAXY, 0, 320);
+  // ty = map(p.x, TS_MAXX, TS_MINX, 0, 240);
 
-    // Restringimos las coordenadas resultantes para que estén dentro de los límites de la pantalla
-    tx = constrain(tx, 0, 319);
-    ty = constrain(ty, 0, 239);
+  // tx = map(p.x, TS_MAXX, TS_MINX, 0, 320);
+  // ty = map(p.y, TS_MINY, TS_MAXY, 0, 240);
 
-    Serial.printf("Touch X:%d Y:%d (Raw P.x:%d P.y:%d P.z:%d)\n", tx, ty, p.x, p.y, p.z);
-    delay(120); // Pequeño delay para evitar múltiples registros rápidos de un solo toque
-    return true;
-  #endif
+  tx = constrain(tx, 0, 319);
+  ty = constrain(ty, 0, 239);
+
+  Serial.printf(
+    "Touch -> X:%d Y:%d | RAW X:%d Y:%d Z:%d\n",
+    tx, ty, p.x, p.y, p.z
+  );
+
+  delay(120);
+
+  return true;
+
+#endif
 }
 
 // ================================================================
@@ -562,42 +568,61 @@ void loop()
 
   int tx, ty;
 
-  // Solo procesa el toque si no estamos en modo DEBUG_TOUCH_RAW
-  #ifndef DEBUG_TOUCH_RAW
-    if (leerTouch(tx, ty))
-    {
+  if (leerTouch(tx, ty))
+  {
       if (vistaCfg)
       {
-        if (tx >= 10 && tx <= 110 && ty >= 200 && ty <= 230)
-        {
-          vistaCfg = false;
-          necesitaRedibujar = true;
-        }
+          // BOTON VOLVER
+          if (
+              tx >= 10 &&
+              tx <= 110 &&
+              ty >= 200 &&
+              ty <= 230
+          )
+          {
+              vistaCfg = false;
+              necesitaRedibujar = true;
+          }
       }
       else
       {
-        if (tx >= CFG_X && tx <= CFG_X + CFG_W && ty >= CFG_Y && ty <= CFG_Y + CFG_H)
-        {
-          vistaCfg = true;
-          necesitaRedibujar = true;
-        }
-        else if (tx >= CARD_X && tx <= CARD_X + CARD_W && ty >= CARD_Y0 && ty <= CARD_Y0 + CARD_H)
-        {
-          offsetVer--;
-          necesitaRedibujar = true;
-        }
-        else if (tx >= CARD_X && tx <= CARD_X + CARD_W && ty >= CARD_Y2 && ty <= CARD_Y2 + CARD_H)
-        {
-          offsetVer++;
-          necesitaRedibujar = true;
-        }
+          // BOTON CONFIG
+          if (
+              tx >= 248 &&
+              tx <= 319 &&
+              ty >= 0 &&
+              ty <= 40
+          )
+          {
+              vistaCfg = true;
+              necesitaRedibujar = true;
+          }
+
+          // TARJETA SUPERIOR
+          else if (
+              tx >= 4 &&
+              tx <= 159 &&
+              ty >= 8 &&
+              ty <= 70
+          )
+          {
+              offsetVer--;
+              necesitaRedibujar = true;
+          }
+
+          // TARJETA INFERIOR
+          else if (
+              tx >= 4 &&
+              tx <= 159 &&
+              ty >= 148 &&
+              ty <= 210
+          )
+          {
+              offsetVer++;
+              necesitaRedibujar = true;
+          }
       }
-    }
-  #else
-    // Si DEBUG_TOUCH_RAW está activo, llamamos a leerTouch solo para que imprima
-    leerTouch(tx, ty);
-    // No hacemos nada más en el loop principal para evitar interacciones accidentales.
-  #endif
+  }
 
   if (necesitaRedibujar)
   {
