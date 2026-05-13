@@ -80,6 +80,7 @@ int offsetVer = 0;
 
 bool vistaCfg = false;
 bool necesitaRedibujar = true;
+unsigned long ultimoTouchValidoMs = 0;
 
 // ===== RED =====
 bool wifiConectado = false;
@@ -130,18 +131,57 @@ int mesDesdeTexto(const char* m)
 #define CFG_W 58
 #define CFG_H 24
 
+// CONFIG hitboxes exactas
+#define BTN_VOLVER_X 10
+#define BTN_VOLVER_Y 200
+#define BTN_VOLVER_W 100
+#define BTN_VOLVER_H 30
+
+#define VEG_MINUS_X 150
+#define VEG_MINUS_Y 80
+#define VEG_MINUS_W 36
+#define VEG_MINUS_H 26
+#define VEG_PLUS_X  270
+#define VEG_PLUS_Y  80
+#define VEG_PLUS_W  36
+#define VEG_PLUS_H  26
+#define VEG_VAL_X   194
+#define VEG_VAL_Y   80
+#define VEG_VAL_W   70
+#define VEG_VAL_H   26
+
+#define FLOR_MINUS_X 150
+#define FLOR_MINUS_Y 116
+#define FLOR_MINUS_W 36
+#define FLOR_MINUS_H 26
+#define FLOR_PLUS_X  270
+#define FLOR_PLUS_Y  116
+#define FLOR_PLUS_W  36
+#define FLOR_PLUS_H  26
+#define FLOR_VAL_X   194
+#define FLOR_VAL_Y   116
+#define FLOR_VAL_W   70
+#define FLOR_VAL_H   26
+
 // ================================================================
 //  TOUCH NORMALIZADO (CON MODO DEBUG PARA CALIBRACIÓN)
 // ================================================================
 bool leerTouch(int &tx, int &ty)
 {
   static unsigned long ultimoTouch = 0;
+  static bool esperandoRelease = false;
 
   if (!ts.touched())
+  {
+    esperandoRelease = false;
+    return false;
+  }
+
+  if (esperandoRelease)
     return false;
 
   // Anti rebote
-  if (millis() - ultimoTouch < 250)
+  if (millis() - ultimoTouch < 120)
     return false;
 
   ultimoTouch = millis();
@@ -149,7 +189,7 @@ bool leerTouch(int &tx, int &ty)
   TS_Point p = ts.getPoint();
 
   // Filtrado de presión
-  if (p.z < 200 || p.z > 4000)
+  if (p.z < 300 || p.z > 3800)
     return false;
 
 #ifdef DEBUG_TOUCH_RAW
@@ -166,8 +206,8 @@ bool leerTouch(int &tx, int &ty)
 #else
 
   // MAPEO PRINCIPAL
-  tx = map(p.x, TS_MINX, TS_MAXX, 0, 320);
-  ty = map(p.y, TS_MINY, TS_MAXY, 0, 240);
+  tx = map(p.x, TS_MINX, TS_MAXX, 0, 319);
+  ty = map(p.y, TS_MINY, TS_MAXY, 0, 239);
 
   // OPCIONES ALTERNATIVAS
   // tx = map(p.y, TS_MINY, TS_MAXY, 0, 320);
@@ -184,11 +224,23 @@ bool leerTouch(int &tx, int &ty)
     tx, ty, p.x, p.y, p.z
   );
 
-  delay(120);
+  esperandoRelease = true;
 
   return true;
 
 #endif
+}
+
+bool enHitbox(int x, int y, int rx, int ry, int rw, int rh)
+{
+  return (x >= rx && x <= (rx + rw) && y >= ry && y <= (ry + rh));
+}
+
+void dibujarCursorTouch(int x, int y)
+{
+  tft.drawCircle(x, y, 6, MI_CIAN);
+  tft.drawLine(x - 10, y, x + 10, y, MI_CIAN);
+  tft.drawLine(x, y - 10, x, y + 10, MI_CIAN);
 }
 
 // ================================================================
@@ -428,28 +480,51 @@ void dibujarConfiguracion()
 
   tft.setCursor(10, 84);
   tft.print("Inicio VEG:");
-  tft.setCursor(120, 84);
-  tft.printf("dia %d", diaInicioVeg);
-
-  tft.setCursor(10, 102);
+  tft.setCursor(10, 120);
   tft.print("Inicio FLOR:");
-  tft.setCursor(120, 102);
-  tft.printf("dia %d", diaInicioFlor);
+  
+  tft.fillRoundRect(VEG_MINUS_X, VEG_MINUS_Y, VEG_MINUS_W, VEG_MINUS_H, 4, MI_NARANJA);
+  tft.drawRoundRect(VEG_MINUS_X, VEG_MINUS_Y, VEG_MINUS_W, VEG_MINUS_H, 4, MI_BLANCO);
+  tft.setTextColor(MI_BLANCO);
+  tft.setTextSize(2);
+  tft.setCursor(VEG_MINUS_X + 12, VEG_MINUS_Y + 6);
+  tft.print("-");
+
+  tft.fillRoundRect(VEG_VAL_X, VEG_VAL_Y, VEG_VAL_W, VEG_VAL_H, 4, MI_NEGRO);
+  tft.drawRoundRect(VEG_VAL_X, VEG_VAL_Y, VEG_VAL_W, VEG_VAL_H, 4, MI_GRIS);
+  tft.setTextSize(2);
+  tft.setCursor(VEG_VAL_X + 10, VEG_VAL_Y + 6);
+  tft.printf("%d", diaInicioVeg);
+
+  tft.fillRoundRect(VEG_PLUS_X, VEG_PLUS_Y, VEG_PLUS_W, VEG_PLUS_H, 4, MI_NARANJA);
+  tft.drawRoundRect(VEG_PLUS_X, VEG_PLUS_Y, VEG_PLUS_W, VEG_PLUS_H, 4, MI_BLANCO);
+  tft.setCursor(VEG_PLUS_X + 10, VEG_PLUS_Y + 6);
+  tft.print("+");
+
+  tft.fillRoundRect(FLOR_MINUS_X, FLOR_MINUS_Y, FLOR_MINUS_W, FLOR_MINUS_H, 4, MI_NARANJA);
+  tft.drawRoundRect(FLOR_MINUS_X, FLOR_MINUS_Y, FLOR_MINUS_W, FLOR_MINUS_H, 4, MI_BLANCO);
+  tft.setCursor(FLOR_MINUS_X + 12, FLOR_MINUS_Y + 6);
+  tft.print("-");
+
+  tft.fillRoundRect(FLOR_VAL_X, FLOR_VAL_Y, FLOR_VAL_W, FLOR_VAL_H, 4, MI_NEGRO);
+  tft.drawRoundRect(FLOR_VAL_X, FLOR_VAL_Y, FLOR_VAL_W, FLOR_VAL_H, 4, MI_GRIS);
+  tft.setCursor(FLOR_VAL_X + 10, FLOR_VAL_Y + 6);
+  tft.printf("%d", diaInicioFlor);
+
+  tft.fillRoundRect(FLOR_PLUS_X, FLOR_PLUS_Y, FLOR_PLUS_W, FLOR_PLUS_H, 4, MI_NARANJA);
+  tft.drawRoundRect(FLOR_PLUS_X, FLOR_PLUS_Y, FLOR_PLUS_W, FLOR_PLUS_H, 4, MI_BLANCO);
+  tft.setCursor(FLOR_PLUS_X + 10, FLOR_PLUS_Y + 6);
+  tft.print("+");
 
   tft.drawRoundRect(10, 200, 100, 30, 4, MI_NARANJA);
   tft.setTextColor(MI_NARANJA);
   tft.setCursor(36, 210);
   tft.print("VOLVER");
 
+  tft.setTextSize(1);
   tft.setTextColor(MI_GRIS);
-  tft.setCursor(10, 128);
-  tft.print("Opciones:");
-  tft.setCursor(10, 142);
-  tft.print("- Ver estado WiFi");
-  tft.setCursor(10, 154);
-  tft.print("- Ver offset de dia");
-  tft.setCursor(10, 166);
-  tft.print("- Revisar inicio VEG/FLOR");
+  tft.setCursor(10, 160);
+  tft.print("Use [-] y [+] para ajustar umbrales.");
 }
 
 // ================================================================
@@ -467,7 +542,7 @@ void setup()
   tft.invertDisplay(false); // Desactiva la inversión de colores de la pantalla
 
   ts.begin();
-  ts.setRotation(1); // Rota el sistema de coordenadas táctiles para que coincida con la pantalla
+  ts.setRotation(1);
 
   prefs.begin("cultivo", false);
 
@@ -570,29 +645,46 @@ void loop()
 
   if (leerTouch(tx, ty))
   {
+      dibujarCursorTouch(tx, ty);
+      delay(70);
+      necesitaRedibujar = true;
+      ultimoTouchValidoMs = millis();
+
       if (vistaCfg)
       {
-          // BOTON VOLVER
-          if (
-              tx >= 10 &&
-              tx <= 110 &&
-              ty >= 200 &&
-              ty <= 230
-          )
+          if (enHitbox(tx, ty, BTN_VOLVER_X, BTN_VOLVER_Y, BTN_VOLVER_W, BTN_VOLVER_H))
           {
               vistaCfg = false;
+              necesitaRedibujar = true;
+          }
+          else if (enHitbox(tx, ty, VEG_MINUS_X, VEG_MINUS_Y, VEG_MINUS_W, VEG_MINUS_H))
+          {
+              diaInicioVeg = max(0, diaInicioVeg - 1);
+              prefs.putInt("iniVeg", diaInicioVeg);
+              necesitaRedibujar = true;
+          }
+          else if (enHitbox(tx, ty, VEG_PLUS_X, VEG_PLUS_Y, VEG_PLUS_W, VEG_PLUS_H))
+          {
+              diaInicioVeg = min(diaInicioFlor - 1, diaInicioVeg + 1);
+              prefs.putInt("iniVeg", diaInicioVeg);
+              necesitaRedibujar = true;
+          }
+          else if (enHitbox(tx, ty, FLOR_MINUS_X, FLOR_MINUS_Y, FLOR_MINUS_W, FLOR_MINUS_H))
+          {
+              diaInicioFlor = max(diaInicioVeg + 1, diaInicioFlor - 1);
+              prefs.putInt("iniFlor", diaInicioFlor);
+              necesitaRedibujar = true;
+          }
+          else if (enHitbox(tx, ty, FLOR_PLUS_X, FLOR_PLUS_Y, FLOR_PLUS_W, FLOR_PLUS_H))
+          {
+              diaInicioFlor = min(240, diaInicioFlor + 1);
+              prefs.putInt("iniFlor", diaInicioFlor);
               necesitaRedibujar = true;
           }
       }
       else
       {
-          // BOTON CONFIG
-          if (
-              tx >= 248 &&
-              tx <= 319 &&
-              ty >= 0 &&
-              ty <= 40
-          )
+          if (enHitbox(tx, ty, CFG_X, CFG_Y, CFG_W, CFG_H))
           {
               vistaCfg = true;
               necesitaRedibujar = true;
