@@ -12,7 +12,7 @@
 
 #define ENC_S1     2
 #define ENC_S2     3
-#define ENC_KEY    4
+#define BTN_TOUCH  5
 
 // ===== COLORES =====
 #define MI_NEGRO    0x0000
@@ -68,14 +68,14 @@ volatile int8_t deltaEncoder = 0;
 uint8_t ultimoEstadoAB = 0;
 int ultimoCLK = HIGH;
 int ultimoDT = HIGH;
-bool ultimoKey = HIGH;
+bool ultimoEstadoBtn = false;
 unsigned long ultimoMsEncoder = 0;
-unsigned long ultimoMsKey = 0;
+unsigned long ultimoBtnMs = 0;
 unsigned long ultimoMsPaso = 0;
 
 const unsigned long DEBOUNCE_ENCODER_MS = 2;
 const unsigned long STEP_GAP_MS = 3;
-const unsigned long DEBOUNCE_KEY_MS = 45;
+const unsigned long DEBOUNCE_BTN_MS = 70;
 
 const char* MESES[] = {"Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"};
 const char* DIA_SEM[] = {"Dom","Lun","Mar","Mie","Jue","Vie","Sab"};
@@ -257,7 +257,7 @@ void dibujarConfiguracion() {
   tft.drawRoundRect(BTN_VOLVER_X, BTN_VOLVER_Y, BTN_VOLVER_W, BTN_VOLVER_H, 4, MI_NARANJA);
   tft.setTextColor(MI_NARANJA); tft.setTextSize(1); tft.setCursor(36, 210); tft.print("VOLVER");
 
-  tft.setTextColor(MI_GRIS); tft.setCursor(10, 160); tft.print("Girar: mover  Click: editar/guardar");
+  tft.setTextColor(MI_GRIS); tft.setCursor(10, 160); tft.print("Girar: mover  TTP223: editar/guardar");
   dibujarSelectorConfig();
 }
 
@@ -272,13 +272,18 @@ void aplicarPasoEncoder(int8_t dir) {
   necesitaRedibujar = true;
 }
 
-void manejarClick() {
+void manejarConfirmacion() {
   switch (estadoUI) {
     case UI_CALENDARIO: estadoUI = UI_CONFIG; indiceCfg = 0; break;
     case UI_CONFIG:
       if (indiceCfg == 0) estadoUI = UI_EDIT_VEG;
       else if (indiceCfg == 1) estadoUI = UI_EDIT_FLOR;
-      else estadoUI = UI_CALENDARIO;
+      else {
+        validarInicioFases();
+        prefs.putInt("iniVeg", diaInicioVeg);
+        prefs.putInt("iniFlor", diaInicioFlor);
+        estadoUI = UI_CALENDARIO;
+      }
       break;
     case UI_EDIT_VEG:
       validarInicioFases();
@@ -310,11 +315,11 @@ void actualizarEncoder() {
     ultimoEstadoAB = estadoAB; ultimoCLK = clk; ultimoDT = dt;
   }
 
-  bool key = digitalRead(ENC_KEY);
-  if (key != ultimoKey && (ahora - ultimoMsKey >= DEBOUNCE_KEY_MS)) {
-    ultimoMsKey = ahora;
-    ultimoKey = key;
-    if (key == LOW) manejarClick();
+  bool estadoBtn = (digitalRead(BTN_TOUCH) == HIGH);
+  if (estadoBtn != ultimoEstadoBtn && (ahora - ultimoBtnMs >= DEBOUNCE_BTN_MS)) {
+    ultimoBtnMs = ahora;
+    ultimoEstadoBtn = estadoBtn;
+    if (estadoBtn) manejarConfirmacion();
   }
 }
 
@@ -352,8 +357,13 @@ void setup() {
   Serial.begin(115200);
   SPI.begin(12, 13, 11);
 
-  pinMode(ENC_S1, INPUT_PULLUP); pinMode(ENC_S2, INPUT_PULLUP); pinMode(ENC_KEY, INPUT_PULLUP);
-  ultimoCLK = digitalRead(ENC_S1); ultimoDT = digitalRead(ENC_S2); ultimoEstadoAB = (ultimoCLK << 1) | ultimoDT; ultimoKey = digitalRead(ENC_KEY);
+  pinMode(ENC_S1, INPUT_PULLUP);
+  pinMode(ENC_S2, INPUT_PULLUP);
+  pinMode(BTN_TOUCH, INPUT);
+  ultimoCLK = digitalRead(ENC_S1);
+  ultimoDT = digitalRead(ENC_S2);
+  ultimoEstadoAB = (ultimoCLK << 1) | ultimoDT;
+  ultimoEstadoBtn = (digitalRead(BTN_TOUCH) == HIGH);
 
   tft.init(240, 320); tft.setRotation(1); tft.invertDisplay(false);
 
