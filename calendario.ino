@@ -200,7 +200,8 @@ void dibujarCalendario() { /* igual estilo */
     int y = (i == -1) ? CARD_Y0 : (i == 0 ? CARD_Y1 : CARD_Y2), d, m, a;
     fechaConDelta(offsetVer + i, d, m, a);
     struct tm t = {0}; t.tm_mday = d; t.tm_mon = m; t.tm_year = a - 1900; t.tm_hour = 12;
-    int diaSem = localtime(&mktime(&t))->tm_wday;
+    time_t tiempo = mktime(&t);
+    int diaSem = localtime(&tiempo)->tm_wday;
     bool foco = (i == 0);
     tft.fillRect(CARD_X, y, CARD_W, CARD_H, foco ? MI_AZUL_OSC : MI_NEGRO);
     tft.drawRect(CARD_X, y, CARD_W, CARD_H, foco ? MI_BLANCO : MI_GRIS);
