@@ -81,6 +81,12 @@ int offsetVer = 0;
 bool vistaCfg = false;
 bool necesitaRedibujar = true;
 unsigned long ultimoTouchValidoMs = 0;
+bool touchActivo = false;
+unsigned long ultimoTouchMs = 0;
+bool mostrarCursor = false;
+int cursorX = 0;
+int cursorY = 0;
+unsigned long cursorTiempo = 0;
 
 // ===== RED =====
 bool wifiConectado = false;
@@ -168,67 +174,66 @@ int mesDesdeTexto(const char* m)
 // ================================================================
 bool leerTouch(int &tx, int &ty)
 {
-  static unsigned long ultimoTouch = 0;
-  static bool esperandoRelease = false;
+  const unsigned long DEBOUNCE_TOUCH_MS = 180;
+  const int PRESION_MIN = 300;
+  const int PRESION_MAX = 3800;
 
-  if (!ts.touched())
+  if (ts.touched() && !touchActivo)
   {
-    esperandoRelease = false;
-    return false;
-  }
+    if (millis() - ultimoTouchMs < DEBOUNCE_TOUCH_MS)
+      return false;
 
-  if (esperandoRelease)
-    return false;
+    touchActivo = true;
+    TS_Point p = ts.getPoint();
 
-  // Anti rebote
-  if (millis() - ultimoTouch < 120)
-    return false;
+    if (p.z < PRESION_MIN || p.z > PRESION_MAX)
+    {
+      while (ts.touched())
+      {
+        delay(5);
+      }
+      touchActivo = false;
+      return false;
+    }
 
-  ultimoTouch = millis();
+    tx = map(p.x, TS_MINX, TS_MAXX, 0, 319);
+    ty = map(p.y, TS_MINY, TS_MAXY, 0, 239);
 
-  TS_Point p = ts.getPoint();
-
-  // Filtrado de presión
-  if (p.z < 300 || p.z > 3800)
-    return false;
+    tx = constrain(tx, 0, 319);
+    ty = constrain(ty, 0, 239);
 
 #ifdef DEBUG_TOUCH_RAW
+    Serial.printf(
+      "Touch -> X:%d Y:%d | RAW X:%d Y:%d Z:%d\n",
+      tx, ty, p.x, p.y, p.z
+    );
+#endif
 
-  Serial.printf(
-    "RAW TOUCH: P.x:%d P.y:%d P.z:%d\n",
-    p.x, p.y, p.z
-  );
+    if (tx < 0 || tx > 319 || ty < 0 || ty > 239)
+    {
+      while (ts.touched())
+      {
+        delay(5);
+      }
+      touchActivo = false;
+      return false;
+    }
 
-  delay(120);
+    while (ts.touched())
+    {
+      delay(5);
+    }
+
+    touchActivo = false;
+    ultimoTouchMs = millis();
+    return true;
+  }
+  else if (!ts.touched())
+  {
+    touchActivo = false;
+  }
 
   return false;
-
-#else
-
-  // MAPEO PRINCIPAL
-  tx = map(p.x, TS_MINX, TS_MAXX, 0, 319);
-  ty = map(p.y, TS_MINY, TS_MAXY, 0, 239);
-
-  // OPCIONES ALTERNATIVAS
-  // tx = map(p.y, TS_MINY, TS_MAXY, 0, 320);
-  // ty = map(p.x, TS_MAXX, TS_MINX, 0, 240);
-
-  // tx = map(p.x, TS_MAXX, TS_MINX, 0, 320);
-  // ty = map(p.y, TS_MINY, TS_MAXY, 0, 240);
-
-  tx = constrain(tx, 0, 319);
-  ty = constrain(ty, 0, 239);
-
-  Serial.printf(
-    "Touch -> X:%d Y:%d | RAW X:%d Y:%d Z:%d\n",
-    tx, ty, p.x, p.y, p.z
-  );
-
-  esperandoRelease = true;
-
-  return true;
-
-#endif
 }
 
 bool enHitbox(int x, int y, int rx, int ry, int rw, int rh)
@@ -236,11 +241,21 @@ bool enHitbox(int x, int y, int rx, int ry, int rw, int rh)
   return (x >= rx && x <= (rx + rw) && y >= ry && y <= (ry + rh));
 }
 
-void dibujarCursorTouch(int x, int y)
+void dibujarCursor()
 {
-  tft.drawCircle(x, y, 6, MI_CIAN);
-  tft.drawLine(x - 10, y, x + 10, y, MI_CIAN);
-  tft.drawLine(x, y - 10, x, y + 10, MI_CIAN);
+  if (!mostrarCursor)
+    return;
+
+  if (millis() - cursorTiempo > 300)
+  {
+    mostrarCursor = false;
+    necesitaRedibujar = true;
+    return;
+  }
+
+  tft.drawCircle(cursorX, cursorY, 6, MI_CIAN);
+  tft.drawLine(cursorX - 8, cursorY, cursorX + 8, cursorY, MI_CIAN);
+  tft.drawLine(cursorX, cursorY - 8, cursorX, cursorY + 8, MI_CIAN);
 }
 
 // ================================================================
@@ -542,7 +557,7 @@ void setup()
   tft.invertDisplay(false); // Desactiva la inversión de colores de la pantalla
 
   ts.begin();
-  ts.setRotation(3);
+  ts.setRotation(1);
 
   prefs.begin("cultivo", false);
 
@@ -645,9 +660,10 @@ void loop()
 
   if (leerTouch(tx, ty))
   {
-      dibujarCursorTouch(tx, ty);
-      delay(70);
-      necesitaRedibujar = true;
+      cursorX = tx;
+      cursorY = ty;
+      cursorTiempo = millis();
+      mostrarCursor = true;
       ultimoTouchValidoMs = millis();
 
       if (vistaCfg)
@@ -725,4 +741,6 @@ void loop()
     }
     necesitaRedibujar = false;
   }
+
+  dibujarCursor();
 }
