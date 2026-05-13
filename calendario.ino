@@ -60,9 +60,13 @@ unsigned long ultimoIntentoNtpMs = 0, ultimoIntentoWifiMs = 0;
 const long GMT_OFFSET_SEC = -21600;
 const int DAYLIGHT_OFFSET_SEC = 0;
 bool modoPlanta = false;
-bool keyManteniendo = false;
-unsigned long inicioHoldKey = 0;
+bool botonPresionado = false;
+bool longPressDetectado = false;
+unsigned long tiempoPresionado = 0;
 const unsigned long HOLD_PLANTA_MS = 5000;
+unsigned long ultimoFramePlanta = 0;
+const unsigned long FRAME_MS = 80;
+bool fondoPlantaDibujado = false;
 
 int16_t deltaEncoder = 0;
 uint8_t ultimoEstadoAB = 0;
@@ -245,6 +249,13 @@ void dibujarConfiguracion() {
   tft.setTextColor(MI_NARANJA); tft.setTextSize(1); tft.setCursor(36, 210); tft.print("VOLVER");
 }
 
+void dibujarFondoModoPlanta() {
+  tft.fillScreen(MI_NEGRO);
+  tft.drawLine(0, 190, 319, 190, MI_GRIS);
+  tft.fillRect(0, 191, 320, 49, MI_AZUL_OSC);
+  tft.fillRect(130, 150, 60, 40, 0x526A);
+}
+
 void dibujarModoPlanta() {
   int d, m, a;
   fechaConDelta(offsetVer, d, m, a);
@@ -259,10 +270,13 @@ void dibujarModoPlanta() {
   bool ojosAbiertos = ((ahora / 2300) % 8) != 0;
   int brillo = ((ahora / 180) % 6);
 
-  tft.fillScreen(MI_NEGRO);
-  tft.drawLine(0, 190, 319, 190, MI_GRIS);
-  tft.fillRect(0, 191, 320, 49, MI_AZUL_OSC);
+  if (!fondoPlantaDibujado) {
+    dibujarFondoModoPlanta();
+    fondoPlantaDibujado = true;
+  }
+  tft.fillRect(90, 80, 140, 110, MI_NEGRO);
   tft.fillRect(130, 150, 60, 40, 0x526A);
+  tft.fillRect(10, 8, 220, 70, MI_NEGRO);
 
   int cx = 160 + sway;
   int baseY = 190;
@@ -421,20 +435,24 @@ void actualizarEncoder() {
     ultimoBtnMs = ahora;
     ultimoEstadoBtn = estadoBtn;
     if (estadoBtn) {
-      keyManteniendo = true;
-      inicioHoldKey = ahora;
-      manejarConfirmacion();
+      botonPresionado = true;
+      longPressDetectado = false;
+      tiempoPresionado = ahora;
     } else {
-      keyManteniendo = false;
+      if (botonPresionado && !longPressDetectado) manejarConfirmacion();
+      botonPresionado = false;
+      longPressDetectado = false;
     }
   }
 
-  if (keyManteniendo && estadoBtn && (ahora - inicioHoldKey >= HOLD_PLANTA_MS)) {
+  if (botonPresionado && estadoBtn && !longPressDetectado && (ahora - tiempoPresionado >= HOLD_PLANTA_MS)) {
     modoPlanta = !modoPlanta;
-    keyManteniendo = false;
+    longPressDetectado = true;
+    necesitaRedibujar = !modoPlanta;
+    fondoPlantaDibujado = false;
   }
 }
-void consumirEncoder(){ int8_t p=deltaEncoder; if(!p)return; deltaEncoder=0; while(p>0){aplicarPasoEncoder(1);p--;} while(p<0){aplicarPasoEncoder(-1);p++;} }
+void consumirEncoder(){ if(modoPlanta){deltaEncoder=0;return;} int8_t p=deltaEncoder; if(!p)return; deltaEncoder=0; while(p>0){aplicarPasoEncoder(1);p--;} while(p<0){aplicarPasoEncoder(-1);p++;} }
 
 void actualizarFechaSiEsPosible() {
   if (WiFi.status() != WL_CONNECTED) { wifiConectado = false; if (millis()-ultimoIntentoWifiMs>30000UL){ WiFi.begin(SSID, PASSWORD); ultimoIntentoWifiMs=millis(); } return; }
@@ -475,10 +493,18 @@ void setup() {
 }
 
 void loop() {
-  actualizarFechaSiEsPosible(); actualizarEncoder(); consumirEncoder();
+  actualizarFechaSiEsPosible();
+  actualizarEncoder();
+  consumirEncoder();
+
   if (modoPlanta) {
-    dibujarModoPlanta();
+    unsigned long ahora = millis();
+    if (ahora - ultimoFramePlanta >= FRAME_MS) {
+      ultimoFramePlanta = ahora;
+      dibujarModoPlanta();
+    }
     return;
   }
+
   if (necesitaRedibujar) { if (estadoUI == UI_CALENDARIO) dibujarCalendario(); else dibujarConfiguracion(); necesitaRedibujar = false; }
 }
