@@ -60,15 +60,21 @@ unsigned long ultimoIntentoNtpMs = 0, ultimoIntentoWifiMs = 0;
 const long GMT_OFFSET_SEC = -21600;
 const int DAYLIGHT_OFFSET_SEC = 0;
 
-volatile int8_t deltaEncoder = 0;
+int16_t deltaEncoder = 0;
 uint8_t ultimoEstadoAB = 0;
-int ultimoCLK = HIGH, ultimoDT = HIGH;
+int8_t acumuladorEncoder = 0;
 bool ultimoEstadoBtn = false;
-unsigned long ultimoMsEncoder = 0, ultimoBtnMs = 0, ultimoMsPaso = 0;
+unsigned long ultimoMsEncoder = 0, ultimoBtnMs = 0;
 
 const unsigned long DEBOUNCE_ENCODER_MS = 2;
-const unsigned long STEP_GAP_MS = 3;
 const unsigned long DEBOUNCE_BTN_MS = 70;
+
+const int8_t TABLA_ENCODER[16] = {
+   0, -1,  1,  0,
+   1,  0,  0, -1,
+  -1,  0,  0,  1,
+   0,  1, -1,  0
+};
 
 const char* MESES[] = {"Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"};
 const char* DIA_SEM[] = {"Dom","Lun","Mar","Mie","Jue","Vie","Sab"};
@@ -79,10 +85,6 @@ const char* DIA_SEM[] = {"Dom","Lun","Mar","Mie","Jue","Vie","Sab"};
 #define CARD_Y0 8
 #define CARD_Y1 78
 #define CARD_Y2 148
-#define CFG_X 255
-#define CFG_Y 6
-#define CFG_W 58
-#define CFG_H 24
 #define BTN_VOLVER_X 10
 #define BTN_VOLVER_Y 200
 #define BTN_VOLVER_W 100
@@ -216,8 +218,6 @@ void dibujarCalendario() { /* igual estilo */
   if (cult.tocaFertilizar) { tft.setTextColor(MI_AMARILLO); tft.setCursor(168, 35); tft.print("FERTILIZAR"); }
   tft.drawRect(168, 160, 140, 14, MI_GRIS);
   tft.fillRect(170, 162, (int)(136 * cult.progreso), 10, cult.colorFase);
-  tft.drawRoundRect(CFG_X, CFG_Y, CFG_W, CFG_H, 4, MI_NARANJA);
-  tft.setTextSize(1); tft.setTextColor(MI_NARANJA); tft.setCursor(CFG_X + 8, CFG_Y + 8); tft.print("CONFIG");
 }
 
 void dibujarConfiguracion() {
@@ -275,7 +275,35 @@ void manejarConfirmacion() {
 }
 
 int mesDesdeTexto(const char* m) { const char* en[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"}; for (int i=0;i<12;i++) if(!strcmp(m,en[i])) return i; return 0; }
-void actualizarEncoder(){ unsigned long a=millis(); int clk=digitalRead(ENC_S1),dt=digitalRead(ENC_S2); if((clk!=ultimoCLK||dt!=ultimoDT)&&(a-ultimoMsEncoder>=DEBOUNCE_ENCODER_MS)){ ultimoMsEncoder=a; uint8_t e=(clk<<1)|dt; uint8_t tr=(ultimoEstadoAB<<2)|e; int8_t p=0; if(tr==0b1101||tr==0b0100||tr==0b0010||tr==0b1011)p=1; else if(tr==0b1110||tr==0b0111||tr==0b0001||tr==0b1000)p=-1; if(p!=0&&(a-ultimoMsPaso>=STEP_GAP_MS)){ deltaEncoder+=p; ultimoMsPaso=a;} ultimoEstadoAB=e; ultimoCLK=clk; ultimoDT=dt;} bool eb=(digitalRead(BTN_TOUCH)==HIGH); if(eb!=ultimoEstadoBtn&&(a-ultimoBtnMs>=DEBOUNCE_BTN_MS)){ ultimoBtnMs=a; ultimoEstadoBtn=eb; if(eb)manejarConfirmacion(); } }
+void actualizarEncoder() {
+  unsigned long ahora = millis();
+  uint8_t estadoActual = (digitalRead(ENC_S1) << 1) | digitalRead(ENC_S2);
+
+  if (estadoActual != ultimoEstadoAB && (ahora - ultimoMsEncoder) >= DEBOUNCE_ENCODER_MS) {
+    ultimoMsEncoder = ahora;
+    uint8_t transicion = (ultimoEstadoAB << 2) | estadoActual;
+    int8_t movimiento = TABLA_ENCODER[transicion & 0x0F];
+
+    if (movimiento != 0) {
+      acumuladorEncoder += movimiento;
+      if (acumuladorEncoder >= 4) {
+        deltaEncoder++;
+        acumuladorEncoder = 0;
+      } else if (acumuladorEncoder <= -4) {
+        deltaEncoder--;
+        acumuladorEncoder = 0;
+      }
+    }
+    ultimoEstadoAB = estadoActual;
+  }
+
+  bool estadoBtn = (digitalRead(BTN_TOUCH) == HIGH);
+  if (estadoBtn != ultimoEstadoBtn && (ahora - ultimoBtnMs) >= DEBOUNCE_BTN_MS) {
+    ultimoBtnMs = ahora;
+    ultimoEstadoBtn = estadoBtn;
+    if (estadoBtn) manejarConfirmacion();
+  }
+}
 void consumirEncoder(){ int8_t p=deltaEncoder; if(!p)return; deltaEncoder=0; while(p>0){aplicarPasoEncoder(1);p--;} while(p<0){aplicarPasoEncoder(-1);p++;} }
 
 void actualizarFechaSiEsPosible() {
@@ -293,7 +321,8 @@ void actualizarFechaSiEsPosible() {
 void setup() {
   Serial.begin(115200); SPI.begin(12, 13, 11);
   pinMode(ENC_S1, INPUT_PULLUP); pinMode(ENC_S2, INPUT_PULLUP); pinMode(BTN_TOUCH, INPUT);
-  ultimoCLK=digitalRead(ENC_S1); ultimoDT=digitalRead(ENC_S2); ultimoEstadoAB=(ultimoCLK<<1)|ultimoDT; ultimoEstadoBtn=(digitalRead(BTN_TOUCH)==HIGH);
+  ultimoEstadoAB = (digitalRead(ENC_S1) << 1) | digitalRead(ENC_S2);
+  ultimoEstadoBtn = (digitalRead(BTN_TOUCH) == HIGH);
   tft.init(240, 320); tft.setRotation(1); tft.invertDisplay(false);
 
   prefs.begin("cultivo", false);
