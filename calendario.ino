@@ -59,6 +59,10 @@ bool wifiConectado = false;
 unsigned long ultimoIntentoNtpMs = 0, ultimoIntentoWifiMs = 0;
 const long GMT_OFFSET_SEC = -21600;
 const int DAYLIGHT_OFFSET_SEC = 0;
+bool modoPlanta = false;
+bool keyManteniendo = false;
+unsigned long inicioHoldKey = 0;
+const unsigned long HOLD_PLANTA_MS = 5000;
 
 int16_t deltaEncoder = 0;
 uint8_t ultimoEstadoAB = 0;
@@ -241,6 +245,120 @@ void dibujarConfiguracion() {
   tft.setTextColor(MI_NARANJA); tft.setTextSize(1); tft.setCursor(36, 210); tft.print("VOLVER");
 }
 
+void dibujarModoPlanta() {
+  int d, m, a;
+  fechaConDelta(offsetVer, d, m, a);
+  InfoCultivo cult = calcularCultivo(d, m, a);
+
+  unsigned long ahora = millis();
+  int respiracion = (int)((ahora / 55) % 12);
+  if (respiracion > 6) respiracion = 12 - respiracion;
+  int sway = (int)((ahora / 140) % 10);
+  if (sway > 5) sway = 10 - sway;
+  sway -= 2;
+  bool ojosAbiertos = ((ahora / 2300) % 8) != 0;
+  int brillo = ((ahora / 180) % 6);
+
+  tft.fillScreen(MI_NEGRO);
+  tft.drawLine(0, 190, 319, 190, MI_GRIS);
+  tft.fillRect(0, 191, 320, 49, MI_AZUL_OSC);
+  tft.fillRect(130, 150, 60, 40, 0x526A);
+
+  int cx = 160 + sway;
+  int baseY = 190;
+  int alto = 30 + respiracion;
+  int etapaVisual = 0;
+  if (!strcmp(cult.fase, "PLANTULA")) etapaVisual = 0;
+  else if (!strcmp(cult.fase, "VEGETA")) etapaVisual = (cult.progreso < 0.5f) ? 1 : 2;
+  else if (!strcmp(cult.fase, "FLOR T")) etapaVisual = (cult.progreso < 0.5f) ? 3 : 4;
+  else if (cult.progreso < 0.85f) etapaVisual = 5;
+  else etapaVisual = 6;
+
+  tft.fillRect(cx - 3, baseY - alto, 6, alto, MI_VERDE);
+  tft.fillCircle(cx - 12, baseY - alto + 12, 8, MI_VERDE);
+  tft.fillCircle(cx + 12, baseY - alto + 12, 8, MI_VERDE);
+
+  if (etapaVisual == 0) { // 1. PLANTULA
+    tft.fillCircle(cx - 8, baseY - alto + 8, 6, MI_VERDE);
+    tft.fillCircle(cx + 8, baseY - alto + 8, 6, MI_VERDE);
+    tft.fillCircle(cx, baseY - alto - 3, 4, MI_CIAN);
+  } else if (etapaVisual == 1) { // 2. VEGETACION
+    tft.drawLine(cx, baseY - alto + 10, cx - 18, baseY - alto - 4, MI_VERDE);
+    tft.drawLine(cx, baseY - alto + 16, cx + 18, baseY - alto + 1, MI_VERDE);
+    tft.fillCircle(cx - 18, baseY - alto - 4, 7, MI_VERDE);
+    tft.fillCircle(cx + 18, baseY - alto + 1, 7, MI_VERDE);
+    tft.fillCircle(cx, baseY - alto - 12, 6, MI_VERDE);
+  } else if (etapaVisual == 2) { // 3. PREFLORA
+    tft.drawLine(cx, baseY - alto + 8, cx - 20, baseY - alto - 8, MI_VERDE);
+    tft.drawLine(cx, baseY - alto + 14, cx + 22, baseY - alto - 4, MI_VERDE);
+    tft.fillCircle(cx - 20, baseY - alto - 8, 7, MI_VERDE);
+    tft.fillCircle(cx + 22, baseY - alto - 4, 7, MI_VERDE);
+    tft.fillCircle(cx - 6, baseY - alto - 10, 3, MI_BLANCO);
+    tft.fillCircle(cx + 7, baseY - alto - 13, 3, MI_BLANCO);
+    tft.fillCircle(cx, baseY - alto - 16, 3, MI_BLANCO);
+  } else if (etapaVisual == 3) { // 4. INICIO FLORA
+    tft.drawLine(cx, baseY - alto + 7, cx - 23, baseY - alto - 12, MI_VERDE);
+    tft.drawLine(cx, baseY - alto + 13, cx + 24, baseY - alto - 8, MI_VERDE);
+    tft.fillCircle(cx - 23, baseY - alto - 12, 7, MI_VERDE);
+    tft.fillCircle(cx + 24, baseY - alto - 8, 7, MI_VERDE);
+    tft.fillCircle(cx - 8, baseY - alto - 14, 4, MI_AMARILLO);
+    tft.fillCircle(cx + 8, baseY - alto - 16, 4, MI_AMARILLO);
+    tft.fillCircle(cx, baseY - alto - 20, 4, MI_AMARILLO);
+  } else if (etapaVisual == 4) { // 5. MEDIA FLORA
+    tft.drawLine(cx, baseY - alto + 8, cx - 24, baseY - alto - 14, MI_VERDE);
+    tft.drawLine(cx, baseY - alto + 13, cx + 25, baseY - alto - 10, MI_VERDE);
+    tft.fillCircle(cx - 24, baseY - alto - 14, 7, MI_VERDE);
+    tft.fillCircle(cx + 25, baseY - alto - 10, 7, MI_VERDE);
+    tft.fillCircle(cx - 10, baseY - alto - 14, 6, MI_AMARILLO);
+    tft.fillCircle(cx + 11, baseY - alto - 16, 6, MI_AMARILLO);
+    tft.fillCircle(cx, baseY - alto - 22, 7, MI_AMARILLO);
+    tft.fillCircle(cx - 2, baseY - alto - 8, 5, MI_AMARILLO);
+  } else if (etapaVisual == 5) { // 6. FLORA AVANZADA
+    tft.drawLine(cx, baseY - alto + 8, cx - 26, baseY - alto - 14, MI_VERDE);
+    tft.drawLine(cx, baseY - alto + 14, cx + 26, baseY - alto - 14, MI_VERDE);
+    tft.fillCircle(cx - 26, baseY - alto - 14, 7, MI_VERDE);
+    tft.fillCircle(cx + 26, baseY - alto - 14, 7, MI_VERDE);
+    tft.fillCircle(cx - 12, baseY - alto - 14, 7, MI_ROJO);
+    tft.fillCircle(cx + 12, baseY - alto - 14, 7, MI_ROJO);
+    tft.fillCircle(cx, baseY - alto - 22, 8, MI_ROJO);
+    tft.fillCircle(cx - 3, baseY - alto - 7, 6, MI_ROJO);
+    tft.fillCircle(cx + 5, baseY - alto - 8, 6, MI_ROJO);
+  } else { // 7. COSECHA
+    tft.fillRect(cx - 2, baseY - 168, 4, 18, 0x7BEF);
+    tft.drawLine(cx - 4, baseY - 150, cx + 4, baseY - 150, MI_BLANCO);
+    tft.fillRect(130, 150, 60, 40, MI_GRIS);
+  }
+
+  if (etapaVisual != 6) {
+    if (ojosAbiertos) {
+      tft.fillCircle(cx - 4, baseY - alto + 2, 1, MI_NEGRO);
+      tft.fillCircle(cx + 4, baseY - alto + 2, 1, MI_NEGRO);
+    } else {
+      tft.drawLine(cx - 6, baseY - alto + 2, cx - 2, baseY - alto + 2, MI_NEGRO);
+      tft.drawLine(cx + 2, baseY - alto + 2, cx + 6, baseY - alto + 2, MI_NEGRO);
+    }
+  }
+
+  for (int i = 0; i < 4; i++) {
+    int px = 120 + ((int)(ahora / (45 + i * 13)) + i * 41) % 80;
+    int py = 95 + ((int)(ahora / (60 + i * 9)) + i * 23) % 40;
+    tft.fillCircle(px, py, (i % 2) + 1, (brillo > i) ? MI_BLANCO : MI_GRIS);
+  }
+
+  tft.setTextSize(2);
+  tft.setTextColor(cult.colorFase);
+  tft.setCursor(12, 12);
+  tft.print("MODO PLANTA");
+  tft.setTextSize(1);
+  tft.setTextColor(MI_BLANCO);
+  tft.setCursor(12, 36);
+  tft.printf("FASE: %s", cult.fase);
+  tft.setCursor(12, 50);
+  tft.printf("%d ppm  %.1f mS", cult.ppm, cult.mS);
+  tft.drawRect(12, 64, 140, 10, MI_GRIS);
+  tft.fillRect(13, 65, (int)(138 * cult.progreso), 8, cult.colorFase);
+}
+
 void guardarFechasPrefs() {
   prefs.putInt("vegDia", fechaVeg.d); prefs.putInt("vegMes", fechaVeg.m); prefs.putInt("vegAnio", fechaVeg.a);
   prefs.putInt("florDia", fechaFlor.d); prefs.putInt("florMes", fechaFlor.m); prefs.putInt("florAnio", fechaFlor.a);
@@ -302,7 +420,18 @@ void actualizarEncoder() {
   if (estadoBtn != ultimoEstadoBtn && (ahora - ultimoBtnMs) >= DEBOUNCE_BTN_MS) {
     ultimoBtnMs = ahora;
     ultimoEstadoBtn = estadoBtn;
-    if (estadoBtn) manejarConfirmacion();
+    if (estadoBtn) {
+      keyManteniendo = true;
+      inicioHoldKey = ahora;
+      manejarConfirmacion();
+    } else {
+      keyManteniendo = false;
+    }
+  }
+
+  if (keyManteniendo && estadoBtn && (ahora - inicioHoldKey >= HOLD_PLANTA_MS)) {
+    modoPlanta = !modoPlanta;
+    keyManteniendo = false;
   }
 }
 void consumirEncoder(){ int8_t p=deltaEncoder; if(!p)return; deltaEncoder=0; while(p>0){aplicarPasoEncoder(1);p--;} while(p<0){aplicarPasoEncoder(-1);p++;} }
@@ -347,5 +476,9 @@ void setup() {
 
 void loop() {
   actualizarFechaSiEsPosible(); actualizarEncoder(); consumirEncoder();
+  if (modoPlanta) {
+    dibujarModoPlanta();
+    return;
+  }
   if (necesitaRedibujar) { if (estadoUI == UI_CALENDARIO) dibujarCalendario(); else dibujarConfiguracion(); necesitaRedibujar = false; }
 }
