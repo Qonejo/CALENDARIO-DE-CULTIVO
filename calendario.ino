@@ -542,7 +542,7 @@ void setup()
   tft.invertDisplay(false); // Desactiva la inversión de colores de la pantalla
 
   ts.begin();
-  ts.setRotation(1);
+  ts.setRotation(3);
 
   prefs.begin("cultivo", false);
 
