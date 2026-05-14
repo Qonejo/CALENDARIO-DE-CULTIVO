@@ -90,8 +90,12 @@ char mensajeEvento[26] = "";
 unsigned long msCambioFase = 0, msMensajeEvento = 0;
 bool rpgInicializado = false;
 
-struct Particula { int x; int y; int vx; int vy; uint16_t color; bool activa; };
+struct Particula { int x; int y; int oldX; int oldY; int vx; int vy; uint16_t color; bool activa; };
 Particula viento[12];
+Particula corazones[5];
+Particula sparkle[10];
+Particula lluvia[26];
+Particula terpenicas[7];
 unsigned long ultimoRpgMs = 0;
 unsigned long ultimoGuardadoRpgMs = 0;
 
@@ -363,10 +367,28 @@ void inicializarParticulasViento() {
   for (int i = 0; i < 12; i++) {
     viento[i].x = random(0, 320);
     viento[i].y = random(84, 188);
+    viento[i].oldX = viento[i].x;
+    viento[i].oldY = viento[i].y;
     viento[i].vx = random(1, 3);
     viento[i].vy = random(-1, 2);
     viento[i].color = (i % 3 == 0) ? MI_VERDE : ((i % 3 == 1) ? MI_CIAN : MI_BLANCO);
     viento[i].activa = true;
+  }
+  for (int i = 0; i < 5; i++) {
+    corazones[i].x = 0; corazones[i].y = 0; corazones[i].oldX = 0; corazones[i].oldY = 0;
+    corazones[i].vx = 0; corazones[i].vy = 0; corazones[i].color = MI_ROJO; corazones[i].activa = false;
+  }
+  for (int i = 0; i < 10; i++) {
+    sparkle[i].x = 0; sparkle[i].y = 0; sparkle[i].oldX = 0; sparkle[i].oldY = 0;
+    sparkle[i].vx = 1; sparkle[i].vy = 0; sparkle[i].color = MI_VERDE; sparkle[i].activa = false;
+  }
+  for (int i = 0; i < 26; i++) {
+    lluvia[i].x = random(0, 320); lluvia[i].y = random(78, 186); lluvia[i].oldX = lluvia[i].x; lluvia[i].oldY = lluvia[i].y;
+    lluvia[i].vx = 0; lluvia[i].vy = 3; lluvia[i].color = MI_CIAN; lluvia[i].activa = false;
+  }
+  for (int i = 0; i < 7; i++) {
+    terpenicas[i].x = 130 + i * 8; terpenicas[i].y = 110 + ((i % 2) ? 3 : 0); terpenicas[i].oldX = terpenicas[i].x; terpenicas[i].oldY = terpenicas[i].y;
+    terpenicas[i].vx = 0; terpenicas[i].vy = -1; terpenicas[i].color = MI_BLANCO; terpenicas[i].activa = false;
   }
 }
 
@@ -504,15 +526,22 @@ void dibujarModoPlanta() {
   tft.drawBitmap(cx - 40 + sway, baseY - alto + 2, SPRITE_HOJAS[frameHojas], 16, 8, MI_VERDE);
   tft.drawBitmap(cx + 24 - sway, baseY - alto - 2, SPRITE_HOJAS[(frameHojas + 1) % 3], 16, 8, MI_VERDE);
 
+  uint16_t colorFondo = esDia ? MI_AZUL_OSC : MI_NEGRO;
   for (int i = 0; i < 12; i++) {
     if (!viento[i].activa) continue;
+    int radio = 1 + (i % 2);
+    tft.fillCircle(viento[i].oldX, viento[i].oldY, radio, colorFondo);
+    viento[i].oldX = viento[i].x;
+    viento[i].oldY = viento[i].y;
     viento[i].x += viento[i].vx;
     viento[i].y += viento[i].vy;
     if (viento[i].x > 322) { viento[i].x = -2; viento[i].y = random(84, 188); }
     if (viento[i].y < 82) viento[i].y = 188;
     if (viento[i].y > 188) viento[i].y = 82;
+    viento[i].oldX = viento[i].x;
+    viento[i].oldY = viento[i].y;
     uint16_t pCol = (statsRpg.terpenos > 90 && (i % 2 == 0)) ? MI_NARANJA : viento[i].color;
-    tft.fillCircle(viento[i].x, viento[i].y, 1 + (i % 2), pCol);
+    tft.fillCircle(viento[i].x, viento[i].y, radio, pCol);
   }
 
   tft.setTextSize(1);
@@ -531,7 +560,19 @@ void dibujarModoPlanta() {
   tft.setCursor(212, 36); tft.printf("VIG %d", statsRpg.vigor);
   tft.setCursor(212, 46); tft.printf("RES %d", statsRpg.resina);
   tft.setCursor(212, 56); tft.printf("TER %d", statsRpg.terpenos);
-  if (ahora - msCambioFase < 900) for (int i = 0; i < 7; i++) tft.fillCircle(130 + i * 8, 110 + ((i % 2) ? 3 : 0), 2, MI_BLANCO);
+  for (int i = 0; i < 7; i++) {
+    if (terpenicas[i].activa) tft.fillCircle(terpenicas[i].oldX, terpenicas[i].oldY, 2, colorFondo);
+    if (ahora - msCambioFase < 900) {
+      terpenicas[i].activa = true;
+      terpenicas[i].x = 130 + i * 8;
+      terpenicas[i].y = 110 + ((i % 2) ? 3 : 0);
+      tft.fillCircle(terpenicas[i].x, terpenicas[i].y, 2, MI_BLANCO);
+      terpenicas[i].oldX = terpenicas[i].x;
+      terpenicas[i].oldY = terpenicas[i].y;
+    } else {
+      terpenicas[i].activa = false;
+    }
+  }
 
   if (animacionFeliz) {
     tft.drawLine(cx - 6, baseY - alto + 3, cx - 2, baseY - alto + 6, MI_NEGRO);
@@ -539,29 +580,70 @@ void dibujarModoPlanta() {
     tft.drawLine(cx - 6, baseY - alto + 10, cx, baseY - alto + 14, MI_NEGRO);
     tft.drawLine(cx, baseY - alto + 14, cx + 6, baseY - alto + 10, MI_NEGRO);
     for (int i = 0; i < 5; i++) {
-      int hx = cx - 26 + i * 12;
-      int hy = 126 - ((int)((ahora / 70 + i * 5) % 18));
-      tft.fillCircle(hx, hy, 2, MI_ROJO);
-      tft.drawPixel(hx - 2, hy, MI_ROJO); tft.drawPixel(hx + 2, hy, MI_ROJO);
-      tft.drawPixel(hx, hy - 2, MI_ROJO); tft.drawPixel(hx, hy + 2, MI_ROJO);
+      tft.fillCircle(corazones[i].oldX, corazones[i].oldY, 2, colorFondo);
+      tft.drawPixel(corazones[i].oldX - 2, corazones[i].oldY, colorFondo); tft.drawPixel(corazones[i].oldX + 2, corazones[i].oldY, colorFondo);
+      tft.drawPixel(corazones[i].oldX, corazones[i].oldY - 2, colorFondo); tft.drawPixel(corazones[i].oldX, corazones[i].oldY + 2, colorFondo);
+      corazones[i].oldX = corazones[i].x;
+      corazones[i].oldY = corazones[i].y;
+      corazones[i].x = cx - 26 + i * 12;
+      corazones[i].y = 126 - ((int)((ahora / 70 + i * 5) % 18));
+      tft.fillCircle(corazones[i].x, corazones[i].y, 2, MI_ROJO);
+      tft.drawPixel(corazones[i].x - 2, corazones[i].y, MI_ROJO); tft.drawPixel(corazones[i].x + 2, corazones[i].y, MI_ROJO);
+      tft.drawPixel(corazones[i].x, corazones[i].y - 2, MI_ROJO); tft.drawPixel(corazones[i].x, corazones[i].y + 2, MI_ROJO);
+      corazones[i].oldX = corazones[i].x;
+      corazones[i].oldY = corazones[i].y;
+      corazones[i].activa = true;
     }
     for (int i = 0; i < 10; i++) {
-      int sx = (i * 29 + (int)(ahora / 20)) % 320;
-      int sy = 95 + ((i * 11 + (int)(ahora / 35)) % 55);
-      tft.drawPixel(sx, sy, MI_VERDE);
-      tft.drawPixel(sx + 1, sy, MI_BLANCO);
+      tft.drawPixel(sparkle[i].oldX, sparkle[i].oldY, colorFondo);
+      tft.drawPixel(sparkle[i].oldX + 1, sparkle[i].oldY, colorFondo);
+      sparkle[i].oldX = sparkle[i].x;
+      sparkle[i].oldY = sparkle[i].y;
+      sparkle[i].x = (i * 29 + (int)(ahora / 20)) % 320;
+      sparkle[i].y = 95 + ((i * 11 + (int)(ahora / 35)) % 55);
+      tft.drawPixel(sparkle[i].x, sparkle[i].y, MI_VERDE);
+      tft.drawPixel(sparkle[i].x + 1, sparkle[i].y, MI_BLANCO);
+      sparkle[i].oldX = sparkle[i].x;
+      sparkle[i].oldY = sparkle[i].y;
+      sparkle[i].activa = true;
+    }
+  } else {
+    for (int i = 0; i < 5; i++) {
+      if (!corazones[i].activa) continue;
+      tft.fillCircle(corazones[i].oldX, corazones[i].oldY, 2, colorFondo);
+      tft.drawPixel(corazones[i].oldX - 2, corazones[i].oldY, colorFondo); tft.drawPixel(corazones[i].oldX + 2, corazones[i].oldY, colorFondo);
+      tft.drawPixel(corazones[i].oldX, corazones[i].oldY - 2, colorFondo); tft.drawPixel(corazones[i].oldX, corazones[i].oldY + 2, colorFondo);
+      corazones[i].activa = false;
+    }
+    for (int i = 0; i < 10; i++) {
+      if (!sparkle[i].activa) continue;
+      tft.drawPixel(sparkle[i].oldX, sparkle[i].oldY, colorFondo);
+      tft.drawPixel(sparkle[i].oldX + 1, sparkle[i].oldY, colorFondo);
+      sparkle[i].activa = false;
     }
   }
 
   if (animacionRiego) {
     for (int i = 0; i < 26; i++) {
-      int gx = (i * 13 + (int)(ahora / 12)) % 320;
-      int gy = 78 + ((i * 19 + (int)(ahora / 9)) % 108);
-      tft.drawLine(gx, gy, gx, gy + 3, MI_CIAN);
+      tft.drawLine(lluvia[i].oldX, lluvia[i].oldY, lluvia[i].oldX, lluvia[i].oldY + 3, colorFondo);
+      lluvia[i].oldX = lluvia[i].x;
+      lluvia[i].oldY = lluvia[i].y;
+      lluvia[i].x = (i * 13 + (int)(ahora / 12)) % 320;
+      lluvia[i].y = 78 + ((i * 19 + (int)(ahora / 9)) % 108);
+      tft.drawLine(lluvia[i].x, lluvia[i].y, lluvia[i].x, lluvia[i].y + 3, MI_CIAN);
+      lluvia[i].oldX = lluvia[i].x;
+      lluvia[i].oldY = lluvia[i].y;
+      lluvia[i].activa = true;
     }
     tft.fillCircle(cx - 24, baseY - alto - 16, 4, MI_CIAN);
     tft.fillCircle(cx + 24, baseY - alto - 16, 4, MI_CIAN);
     tft.fillCircle(cx, baseY - alto - 24, 5, MI_CIAN);
+  } else {
+    for (int i = 0; i < 26; i++) {
+      if (!lluvia[i].activa) continue;
+      tft.drawLine(lluvia[i].oldX, lluvia[i].oldY, lluvia[i].oldX, lluvia[i].oldY + 3, colorFondo);
+      lluvia[i].activa = false;
+    }
   }
   if (statsRpg.resina > 90) { for (int i = 0; i < 10; i++) { int sx = cx - 24 + (i * 5); int sy = baseY - alto - 22 + (i % 4) * 4; tft.drawPixel(sx, sy, MI_BLANCO); } }
   if (animo == ANIMO_DORMIDA) { tft.setCursor(cx + 22, baseY - alto - 28); tft.print("Zz"); }
