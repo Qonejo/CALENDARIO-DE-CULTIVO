@@ -10,7 +10,7 @@
 #define TFT_DC     8
 #define ENC_S1     2
 #define ENC_S2     3
-#define BTN_TOUCH  5
+#define BTN_KEY    4
 
 #define MI_NEGRO    0x0000
 #define MI_BLANCO   0xFFFF
@@ -67,6 +67,7 @@ const unsigned long HOLD_PLANTA_MS = 5000;
 unsigned long ultimoFramePlanta = 0;
 const unsigned long FRAME_MS = 80;
 bool fondoPlantaDibujado = false;
+uint8_t framePlanta = 0;
 
 int16_t deltaEncoder = 0;
 uint8_t ultimoEstadoAB = 0;
@@ -86,6 +87,25 @@ const int8_t TABLA_ENCODER[16] = {
 
 const char* MESES[] = {"Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"};
 const char* DIA_SEM[] = {"Dom","Lun","Mar","Mie","Jue","Vie","Sab"};
+
+// Animacion pixel-art tipo GIF (sin decoder): sprites 32x32 en PROGMEM.
+const uint8_t PROGMEM SPRITE_PLANTA_BASE[32 * 4] = {
+  0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x80,0x00,
+  0x00,0x03,0xC0,0x00,0x00,0x07,0xE0,0x00,0x00,0x03,0xC0,0x00,0x00,0x01,0x80,0x00,
+  0x00,0x01,0x80,0x00,0x00,0x01,0x80,0x00,0x00,0x01,0x80,0x00,0x00,0x03,0xC0,0x00,
+  0x00,0x07,0xE0,0x00,0x00,0x0F,0xF0,0x00,0x00,0x1F,0xF8,0x00,0x00,0x3F,0xFC,0x00,
+  0x00,0x7F,0xFE,0x00,0x00,0x3F,0xFC,0x00,0x00,0x1F,0xF8,0x00,0x00,0x0F,0xF0,0x00,
+  0x00,0x07,0xE0,0x00,0x00,0x03,0xC0,0x00,0x00,0x01,0x80,0x00,0x00,0x01,0x80,0x00,
+  0x00,0x01,0x80,0x00,0x00,0x01,0x80,0x00,0x00,0x01,0x80,0x00,0x00,0x01,0x80,0x00,
+  0x00,0x03,0xC0,0x00,0x00,0x03,0xC0,0x00,0x00,0x03,0xC0,0x00,0x00,0x00,0x00,0x00
+};
+const uint8_t PROGMEM SPRITE_OJOS_ABIERTOS[8] = {0x00,0x00,0x66,0x00,0x66,0x00,0x00,0x00};
+const uint8_t PROGMEM SPRITE_OJOS_CERRADOS[8] = {0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00};
+const uint8_t PROGMEM SPRITE_HOJAS[3][16] = {
+  {0x18,0x00,0x3C,0x00,0x7E,0x00,0xFF,0x00,0x7E,0x00,0x3C,0x00,0x18,0x00,0x00,0x00},
+  {0x0C,0x00,0x1E,0x00,0x3F,0x00,0x7F,0x80,0x3F,0x00,0x1E,0x00,0x0C,0x00,0x00,0x00},
+  {0x30,0x00,0x78,0x00,0xFC,0x00,0xFE,0x00,0xFC,0x00,0x78,0x00,0x30,0x00,0x00,0x00}
+};
 
 #define CARD_X 4
 #define CARD_W 155
@@ -269,12 +289,13 @@ void dibujarModoPlanta() {
   sway -= 2;
   bool ojosAbiertos = ((ahora / 2300) % 8) != 0;
   int brillo = ((ahora / 180) % 6);
+  int frameHojas = framePlanta % 3;
 
   if (!fondoPlantaDibujado) {
     dibujarFondoModoPlanta();
     fondoPlantaDibujado = true;
   }
-  tft.fillRect(90, 80, 140, 110, MI_NEGRO);
+  tft.fillRect(90, 72, 140, 118, MI_NEGRO);
   tft.fillRect(130, 150, 60, 40, 0x526A);
   tft.fillRect(10, 8, 220, 70, MI_NEGRO);
 
@@ -289,6 +310,7 @@ void dibujarModoPlanta() {
   else etapaVisual = 6;
 
   tft.fillRect(cx - 3, baseY - alto, 6, alto, MI_VERDE);
+  tft.drawBitmap(cx - 16, baseY - alto - 22, SPRITE_PLANTA_BASE, 32, 32, MI_VERDE);
   tft.fillCircle(cx - 12, baseY - alto + 12, 8, MI_VERDE);
   tft.fillCircle(cx + 12, baseY - alto + 12, 8, MI_VERDE);
 
@@ -344,14 +366,10 @@ void dibujarModoPlanta() {
   }
 
   if (etapaVisual != 6) {
-    if (ojosAbiertos) {
-      tft.fillCircle(cx - 4, baseY - alto + 2, 1, MI_NEGRO);
-      tft.fillCircle(cx + 4, baseY - alto + 2, 1, MI_NEGRO);
-    } else {
-      tft.drawLine(cx - 6, baseY - alto + 2, cx - 2, baseY - alto + 2, MI_NEGRO);
-      tft.drawLine(cx + 2, baseY - alto + 2, cx + 6, baseY - alto + 2, MI_NEGRO);
-    }
+    tft.drawBitmap(cx - 8, baseY - alto - 1, ojosAbiertos ? SPRITE_OJOS_ABIERTOS : SPRITE_OJOS_CERRADOS, 8, 8, MI_NEGRO);
   }
+  tft.drawBitmap(cx - 40 + sway, baseY - alto + 2, SPRITE_HOJAS[frameHojas], 16, 8, MI_VERDE);
+  tft.drawBitmap(cx + 24 - sway, baseY - alto - 2, SPRITE_HOJAS[(frameHojas + 1) % 3], 16, 8, MI_VERDE);
 
   for (int i = 0; i < 4; i++) {
     int px = 120 + ((int)(ahora / (45 + i * 13)) + i * 41) % 80;
@@ -430,7 +448,7 @@ void actualizarEncoder() {
     ultimoEstadoAB = estadoActual;
   }
 
-  bool estadoBtn = (digitalRead(BTN_TOUCH) == HIGH);
+  bool estadoBtn = (digitalRead(BTN_KEY) == LOW); // INPUT_PULLUP: LOW = presionado
   if (estadoBtn != ultimoEstadoBtn && (ahora - ultimoBtnMs) >= DEBOUNCE_BTN_MS) {
     ultimoBtnMs = ahora;
     ultimoEstadoBtn = estadoBtn;
@@ -468,9 +486,9 @@ void actualizarFechaSiEsPosible() {
 
 void setup() {
   Serial.begin(115200); SPI.begin(12, 13, 11);
-  pinMode(ENC_S1, INPUT_PULLUP); pinMode(ENC_S2, INPUT_PULLUP); pinMode(BTN_TOUCH, INPUT);
+  pinMode(ENC_S1, INPUT_PULLUP); pinMode(ENC_S2, INPUT_PULLUP); pinMode(BTN_KEY, INPUT_PULLUP);
   ultimoEstadoAB = (digitalRead(ENC_S1) << 1) | digitalRead(ENC_S2);
-  ultimoEstadoBtn = (digitalRead(BTN_TOUCH) == HIGH);
+  ultimoEstadoBtn = (digitalRead(BTN_KEY) == LOW);
   tft.init(240, 320); tft.setRotation(1); tft.invertDisplay(false);
 
   prefs.begin("cultivo", false);
@@ -501,6 +519,7 @@ void loop() {
     unsigned long ahora = millis();
     if (ahora - ultimoFramePlanta >= FRAME_MS) {
       ultimoFramePlanta = ahora;
+      framePlanta++;
       dibujarModoPlanta();
     }
     return;
