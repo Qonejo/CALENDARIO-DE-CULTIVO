@@ -137,6 +137,16 @@ const uint8_t PROGMEM SPRITE_HOJAS[3][16] = {
   {0x30,0x00,0x78,0x00,0xFC,0x00,0xFE,0x00,0xFC,0x00,0x78,0x00,0x30,0x00,0x00,0x00}
 };
 
+void drawLeafCannabis(int x, int y, uint16_t color) {
+  tft.drawLine(x, y + 8, x, y + 1, color);
+  tft.drawPixel(x, y, color);
+  tft.drawLine(x, y + 6, x - 3, y + 3, color);
+  tft.drawLine(x, y + 6, x + 3, y + 3, color);
+  tft.drawPixel(x - 4, y + 4, color); tft.drawPixel(x + 4, y + 4, color);
+  tft.drawPixel(x - 2, y + 5, color); tft.drawPixel(x + 2, y + 5, color);
+  tft.drawPixel(x - 1, y + 3, color); tft.drawPixel(x + 1, y + 3, color);
+}
+
 #define CARD_X 4
 #define CARD_W 155
 #define CARD_H 62
@@ -427,10 +437,10 @@ void dibujarModoPlanta() {
   statsVivas = calcularStatsVivas(cult);
   actualizarStatsRpgLentas(cult, ahora);
 
-  int respiracion = (int)((ahora / (esDia ? 60 : 120)) % 12);
-  if (respiracion > 6) respiracion = 12 - respiracion;
-  int sway = (int)((ahora / 140) % 10);
-  if (sway > 5) sway = 10 - sway;
+  int respiracion = (int)((ahora / (esDia ? 80 : 150)) % 8);
+  if (respiracion > 4) respiracion = 8 - respiracion;
+  int sway = (int)((ahora / 190) % 8);
+  if (sway > 4) sway = 8 - sway;
   sway -= 2;
   bool ojosAbiertos = esDia && ((ahora / 2300) % 8) != 0;
   int brillo = ((ahora / 180) % 6);
@@ -453,9 +463,9 @@ void dibujarModoPlanta() {
   }
 
   EstadoAnimoPlanta animo = !esDia ? ANIMO_DORMIDA : (statsVivas.salud < 70 ? ANIMO_ESTRESADA : (statsVivas.agua < 50 ? ANIMO_TRISTE : ANIMO_FELIZ));
-  int cx = 160 + sway + (animo == ANIMO_ESTRESADA ? ((ahora / 80) % 3) - 1 : 0);
+  int cx = 160 + sway + (animo == ANIMO_ESTRESADA ? ((ahora / 110) % 3) - 1 : 0);
   int baseY = 190;
-  int alto = 30 + respiracion;
+  int alto = 26 + respiracion;
   int etapaVisual = 0;
   if (!strcmp(cult.fase, "PLANTULA")) etapaVisual = 0;
   else if (!strcmp(cult.fase, "VEGETA")) etapaVisual = (cult.progreso < 0.5f) ? 1 : 2;
@@ -463,68 +473,92 @@ void dibujarModoPlanta() {
   else if (cult.progreso < 0.85f) etapaVisual = 5;
   else etapaVisual = 6;
 
-  uint16_t verdeVivo = (uint16_t)min(0x07E0, MI_VERDE + bonusAlegria * 32);
-  tft.fillRect(cx - 3, baseY - alto, 6, alto, animo == ANIMO_ESTRESADA ? 0x03E0 : verdeVivo);
-  tft.drawBitmap(cx - 16, baseY - alto - 22, SPRITE_PLANTA_BASE, 32, 32, MI_VERDE);
-  tft.fillCircle(cx - 12, baseY - alto + (animo == ANIMO_TRISTE ? 16 : 12), 8, MI_VERDE);
-  tft.fillCircle(cx + 12, baseY - alto + (animo == ANIMO_TRISTE ? 16 : 12), 8, MI_VERDE);
+  uint16_t verdeVivo = (uint16_t)min(0x07E0, MI_VERDE + bonusAlegria * 20);
+  uint16_t verdeHoja = (animo == ANIMO_ESTRESADA) ? 0x04E0 : verdeVivo;
+  uint16_t verdeOsc = 0x03A0;
+  uint16_t colorPistilo = 0xFFDF;
+  uint16_t colorCogolloA = 0xA13F;
+  uint16_t colorCogolloB = 0xD3A0;
+
+  tft.fillRoundRect(cx - 16, baseY, 32, 7, 3, 0x2104); // sombra
+
+  int potW = 34;
+  int potH = 20;
+  tft.drawFastHLine(cx - (potW / 2) - 2, baseY - 1, potW + 4, 0x8B4E);
+  tft.fillRect(cx - (potW / 2), baseY, potW, potH, 0x526A);
+  tft.drawRect(cx - (potW / 2), baseY, potW, potH, 0x39C7);
+  tft.drawFastHLine(cx - (potW / 2) + 2, baseY + 5, potW - 4, 0x39C7);
+
+  tft.drawFastVLine(cx, baseY - alto + 8, alto - 8, verdeOsc);
+  tft.drawFastVLine(cx - 1, baseY - alto + 12, alto - 12, verdeHoja);
+  tft.drawFastVLine(cx + 1, baseY - alto + 12, alto - 12, verdeHoja);
+
+  int yTop = baseY - alto - 2;
+  tft.drawLine(cx, baseY - alto + 6, cx - 12, baseY - alto - 3, verdeOsc);
+  tft.drawLine(cx, baseY - alto + 6, cx + 12, baseY - alto - 3, verdeOsc);
+  tft.drawLine(cx, baseY - alto + 14, cx - 10, baseY - alto + 6, verdeOsc);
+  tft.drawLine(cx, baseY - alto + 14, cx + 10, baseY - alto + 6, verdeOsc);
 
   if (etapaVisual == 0) { // 1. PLANTULA
-    tft.fillCircle(cx - 8, baseY - alto + 8, 6, MI_VERDE);
-    tft.fillCircle(cx + 8, baseY - alto + 8, 6, MI_VERDE);
-    tft.fillCircle(cx, baseY - alto - 3, 4, MI_CIAN);
+    drawLeafCannabis(cx - 4, baseY - alto + 7, verdeHoja);
+    drawLeafCannabis(cx + 4, baseY - alto + 7, verdeHoja);
+    drawLeafCannabis(cx, baseY - alto - 1, 0x05EF);
   } else if (etapaVisual == 1) { // 2. VEGETACION
-    tft.drawLine(cx, baseY - alto + 10, cx - 18, baseY - alto - 4, MI_VERDE);
-    tft.drawLine(cx, baseY - alto + 16, cx + 18, baseY - alto + 1, MI_VERDE);
-    tft.fillCircle(cx - 18, baseY - alto - 4, 7, MI_VERDE);
-    tft.fillCircle(cx + 18, baseY - alto + 1, 7, MI_VERDE);
-    tft.fillCircle(cx, baseY - alto - 12, 6, MI_VERDE);
+    drawLeafCannabis(cx - 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx + 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx - 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx + 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx, yTop, verdeHoja);
   } else if (etapaVisual == 2) { // 3. PREFLORA
-    tft.drawLine(cx, baseY - alto + 8, cx - 20, baseY - alto - 8, MI_VERDE);
-    tft.drawLine(cx, baseY - alto + 14, cx + 22, baseY - alto - 4, MI_VERDE);
-    tft.fillCircle(cx - 20, baseY - alto - 8, 7, MI_VERDE);
-    tft.fillCircle(cx + 22, baseY - alto - 4, 7, MI_VERDE);
-    tft.fillCircle(cx - 6, baseY - alto - 10, 3, MI_BLANCO);
-    tft.fillCircle(cx + 7, baseY - alto - 13, 3, MI_BLANCO);
-    tft.fillCircle(cx, baseY - alto - 16, 3, MI_BLANCO);
+    drawLeafCannabis(cx - 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx + 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx - 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx + 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx, yTop, verdeHoja);
+    tft.drawPixel(cx - 3, yTop + 5, colorPistilo);
+    tft.drawPixel(cx + 3, yTop + 5, colorPistilo);
+    tft.drawPixel(cx, yTop + 2, colorPistilo);
   } else if (etapaVisual == 3) { // 4. INICIO FLORA
-    tft.drawLine(cx, baseY - alto + 7, cx - 23, baseY - alto - 12, MI_VERDE);
-    tft.drawLine(cx, baseY - alto + 13, cx + 24, baseY - alto - 8, MI_VERDE);
-    tft.fillCircle(cx - 23, baseY - alto - 12, 7, MI_VERDE);
-    tft.fillCircle(cx + 24, baseY - alto - 8, 7, MI_VERDE);
-    for (int k = 0; k < 9; k++) tft.fillCircle(cx - 10 + (k % 3) * 7, baseY - alto - 20 + (k / 3) * 5, 3, (k % 2) ? MI_AMARILLO : MI_NARANJA);
+    drawLeafCannabis(cx - 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx + 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx - 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx + 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx, yTop, verdeHoja);
+    tft.fillRect(cx - 2, yTop + 1, 5, 5, colorCogolloA);
+    tft.drawPixel(cx - 1, yTop + 2, colorPistilo); tft.drawPixel(cx + 1, yTop + 3, colorPistilo);
   } else if (etapaVisual == 4) { // 5. MEDIA FLORA
-    tft.drawLine(cx, baseY - alto + 8, cx - 24, baseY - alto - 14, MI_VERDE);
-    tft.drawLine(cx, baseY - alto + 13, cx + 25, baseY - alto - 10, MI_VERDE);
-    tft.fillCircle(cx - 24, baseY - alto - 14, 7, MI_VERDE);
-    tft.fillCircle(cx + 25, baseY - alto - 10, 7, MI_VERDE);
-    for (int k = 0; k < 16; k++) {
-      int ox = (k % 4) * 6 - 11;
-      int oy = (k / 4) * 5 - 22;
-      tft.fillCircle(cx + ox, baseY - alto + oy, 3 + (k % 2), (k % 3 == 0) ? MI_AMARILLO : ((k % 3 == 1) ? MI_NARANJA : 0xA81F));
-    }
+    drawLeafCannabis(cx - 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx + 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx - 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx + 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx, yTop, verdeHoja);
+    tft.fillRect(cx - 3, yTop, 7, 6, colorCogolloA);
+    tft.fillRect(cx - 10, yTop + 5, 4, 4, colorCogolloB);
+    tft.fillRect(cx + 6, yTop + 5, 4, 4, MI_NARANJA);
+    tft.drawPixel(cx - 1, yTop + 1, colorPistilo); tft.drawPixel(cx + 2, yTop + 2, colorPistilo);
   } else if (etapaVisual == 5) { // 6. FLORA AVANZADA
-    tft.drawLine(cx, baseY - alto + 8, cx - 26, baseY - alto - 14, MI_VERDE);
-    tft.drawLine(cx, baseY - alto + 14, cx + 26, baseY - alto - 14, MI_VERDE);
-    tft.fillCircle(cx - 26, baseY - alto - 14, 7, MI_VERDE);
-    tft.fillCircle(cx + 26, baseY - alto - 14, 7, MI_VERDE);
-    const uint16_t palFlores[4] = {0xA81F, MI_VERDE, MI_NARANJA, MI_AMARILLO};
-    for (int k = 0; k < 14; k++) {
-      int ox = (k % 7) * 4 - 12;
-      int oy = (k / 7) * 4 - 20;
-      tft.fillCircle(cx + ox, baseY - alto + oy, 4, palFlores[k % 4]);
+    drawLeafCannabis(cx - 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx + 12, baseY - alto - 7, verdeHoja);
+    drawLeafCannabis(cx - 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx + 10, baseY - alto + 2, verdeHoja);
+    drawLeafCannabis(cx, yTop, verdeHoja);
+    const uint16_t palCog[4] = {colorCogolloA, MI_NARANJA, MI_AMARILLO, 0xA81F};
+    for (int k = 0; k < 8; k++) {
+      int ox = (k - 4) * 2;
+      tft.fillRect(cx + ox, yTop + 1 + (k % 2), 3, 4, palCog[k % 4]);
     }
+    tft.drawPixel(cx - 2, yTop + 1, colorPistilo); tft.drawPixel(cx + 1, yTop + 1, colorPistilo); tft.drawPixel(cx + 4, yTop + 2, colorPistilo);
   } else { // 7. COSECHA
     tft.fillRect(cx - 2, baseY - 168, 4, 18, 0x7BEF);
     tft.drawLine(cx - 4, baseY - 150, cx + 4, baseY - 150, MI_BLANCO);
-    tft.fillRect(130, 150, 60, 40, MI_GRIS);
+    tft.fillRect(cx - 16, baseY - 2, 32, 20, MI_GRIS);
   }
 
   if (etapaVisual != 6) {
     tft.drawBitmap(cx - 8, baseY - alto - 1, ojosAbiertos ? SPRITE_OJOS_ABIERTOS : SPRITE_OJOS_CERRADOS, 8, 8, MI_NEGRO);
   }
-  tft.drawBitmap(cx - 40 + sway, baseY - alto + 2, SPRITE_HOJAS[frameHojas], 16, 8, MI_VERDE);
-  tft.drawBitmap(cx + 24 - sway, baseY - alto - 2, SPRITE_HOJAS[(frameHojas + 1) % 3], 16, 8, MI_VERDE);
+  drawLeafCannabis(cx - 15 + (frameHojas - 1), baseY - alto + 4, verdeHoja);
+  drawLeafCannabis(cx + 15 - (frameHojas - 1), baseY - alto + 2, verdeHoja);
 
   uint16_t colorFondo = esDia ? MI_AZUL_OSC : MI_NEGRO;
   for (int i = 0; i < 12; i++) {
