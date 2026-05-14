@@ -68,6 +68,15 @@ unsigned long ultimoFramePlanta = 0;
 const unsigned long FRAME_MS = 80;
 bool fondoPlantaDibujado = false;
 uint8_t framePlanta = 0;
+enum EstadoAnimoPlanta { ANIMO_FELIZ, ANIMO_TRISTE, ANIMO_DORMIDA, ANIMO_ESTRESADA };
+struct StatsVivas { uint8_t agua, felicidad, salud, energia; };
+struct StatsRPG { uint8_t genetica, vigor, resina, terpenos; };
+StatsRPG statsRpg = {85, 85, 85, 85};
+StatsVivas statsVivas = {100, 100, 100, 100};
+char faseAnterior[10] = "";
+char mensajeEvento[26] = "";
+unsigned long msCambioFase = 0, msMensajeEvento = 0;
+bool rpgInicializado = false;
 
 int16_t deltaEncoder = 0;
 uint8_t ultimoEstadoAB = 0;
@@ -276,30 +285,66 @@ void dibujarFondoModoPlanta() {
   tft.fillRect(130, 150, 60, 40, 0x526A);
 }
 
+void mostrarMensajeEvento(const char* txt) {
+  strncpy(mensajeEvento, txt, sizeof(mensajeEvento) - 1);
+  mensajeEvento[sizeof(mensajeEvento) - 1] = '\0';
+  msMensajeEvento = millis();
+}
+
+StatsVivas calcularStatsVivas(const InfoCultivo &cult) {
+  StatsVivas s;
+  s.agua = cult.tocaRegar ? 30 : 92;
+  s.felicidad = cult.tocaRegar ? 50 : 88;
+  bool ppmOk = (!strcmp(cult.fase, "PLANTULA") && cult.ppm >= 100 && cult.ppm <= 250) ||
+               (!strcmp(cult.fase, "VEGETA") && cult.ppm >= 300 && cult.ppm <= 450) ||
+               (!strcmp(cult.fase, "FLOR T") && cult.ppm >= 500 && cult.ppm <= 1100) ||
+               (!strcmp(cult.fase, "FLOR A") && cult.ppm >= 1200 && cult.ppm <= 1600);
+  s.salud = ppmOk ? 100 : 62;
+  s.energia = (!cult.tocaRegar && !cult.tocaFertilizar) ? 90 : 60;
+  return s;
+}
+
 void dibujarModoPlanta() {
   int d, m, a;
   fechaConDelta(offsetVer, d, m, a);
   InfoCultivo cult = calcularCultivo(d, m, a);
 
+  struct tm ti;
+  bool hayHora = getLocalTime(&ti, 5);
+  int hora = hayHora ? ti.tm_hour : 12;
+  bool esDia = (hora >= 7 && hora < 19);
+
   unsigned long ahora = millis();
-  int respiracion = (int)((ahora / 55) % 12);
+  if (strcmp(faseAnterior, cult.fase) != 0) {
+    strncpy(faseAnterior, cult.fase, sizeof(faseAnterior) - 1);
+    faseAnterior[sizeof(faseAnterior) - 1] = '\0';
+    msCambioFase = ahora;
+    if (!strcmp(cult.fase, "FLOR T")) mostrarMensajeEvento("+ FLORACION INICIADA");
+  }
+  statsVivas = calcularStatsVivas(cult);
+  if (cult.tocaRegar) mostrarMensajeEvento("+ RIEGO COMPLETO");
+  if (cult.tocaFertilizar) mostrarMensajeEvento("+ FERTILIZADA");
+
+  int respiracion = (int)((ahora / (esDia ? 60 : 120)) % 12);
   if (respiracion > 6) respiracion = 12 - respiracion;
   int sway = (int)((ahora / 140) % 10);
   if (sway > 5) sway = 10 - sway;
   sway -= 2;
-  bool ojosAbiertos = ((ahora / 2300) % 8) != 0;
+  bool ojosAbiertos = esDia && ((ahora / 2300) % 8) != 0;
   int brillo = ((ahora / 180) % 6);
   int frameHojas = framePlanta % 3;
 
-  if (!fondoPlantaDibujado) {
-    dibujarFondoModoPlanta();
-    fondoPlantaDibujado = true;
+  tft.fillScreen(esDia ? MI_AZUL_OSC : MI_NEGRO);
+  if (!esDia) {
+    tft.fillCircle(278, 20, 10, MI_AMARILLO);
+    for (int i = 0; i < 20; i++) tft.fillCircle((i * 17 + (ahora / 80)) % 320, (i * 19) % 90, 1, MI_BLANCO);
   }
-  tft.fillRect(90, 72, 140, 118, MI_NEGRO);
+  tft.fillRect(90, 72, 140, 118, esDia ? MI_AZUL_OSC : MI_NEGRO);
   tft.fillRect(130, 150, 60, 40, 0x526A);
   tft.fillRect(10, 8, 220, 70, MI_NEGRO);
 
-  int cx = 160 + sway;
+  EstadoAnimoPlanta animo = !esDia ? ANIMO_DORMIDA : (statsVivas.salud < 70 ? ANIMO_ESTRESADA : (statsVivas.agua < 50 ? ANIMO_TRISTE : ANIMO_FELIZ));
+  int cx = 160 + sway + (animo == ANIMO_ESTRESADA ? ((ahora / 80) % 3) - 1 : 0);
   int baseY = 190;
   int alto = 30 + respiracion;
   int etapaVisual = 0;
@@ -309,10 +354,10 @@ void dibujarModoPlanta() {
   else if (cult.progreso < 0.85f) etapaVisual = 5;
   else etapaVisual = 6;
 
-  tft.fillRect(cx - 3, baseY - alto, 6, alto, MI_VERDE);
+  tft.fillRect(cx - 3, baseY - alto, 6, alto, animo == ANIMO_ESTRESADA ? 0x03E0 : MI_VERDE);
   tft.drawBitmap(cx - 16, baseY - alto - 22, SPRITE_PLANTA_BASE, 32, 32, MI_VERDE);
-  tft.fillCircle(cx - 12, baseY - alto + 12, 8, MI_VERDE);
-  tft.fillCircle(cx + 12, baseY - alto + 12, 8, MI_VERDE);
+  tft.fillCircle(cx - 12, baseY - alto + (animo == ANIMO_TRISTE ? 16 : 12), 8, MI_VERDE);
+  tft.fillCircle(cx + 12, baseY - alto + (animo == ANIMO_TRISTE ? 16 : 12), 8, MI_VERDE);
 
   if (etapaVisual == 0) { // 1. PLANTULA
     tft.fillCircle(cx - 8, baseY - alto + 8, 6, MI_VERDE);
@@ -371,10 +416,12 @@ void dibujarModoPlanta() {
   tft.drawBitmap(cx - 40 + sway, baseY - alto + 2, SPRITE_HOJAS[frameHojas], 16, 8, MI_VERDE);
   tft.drawBitmap(cx + 24 - sway, baseY - alto - 2, SPRITE_HOJAS[(frameHojas + 1) % 3], 16, 8, MI_VERDE);
 
-  for (int i = 0; i < 4; i++) {
-    int px = 120 + ((int)(ahora / (45 + i * 13)) + i * 41) % 80;
-    int py = 95 + ((int)(ahora / (60 + i * 9)) + i * 23) % 40;
-    tft.fillCircle(px, py, (i % 2) + 1, (brillo > i) ? MI_BLANCO : MI_GRIS);
+  for (int i = 0; i < 12; i++) {
+    int px = (i * 27 + (int)(ahora / (25 + i * 3))) % 320;
+    int py = 90 + ((i * 17 + (int)(ahora / (30 + i * 2))) % 90);
+    uint16_t pCol = cult.tocaRegar ? MI_GRIS : (statsVivas.salud > 90 ? MI_VERDE : (cult.tocaFertilizar ? MI_AMARILLO : MI_BLANCO));
+    if (cult.tocaRegar) tft.drawLine(px, py, px - 1, py + 2, pCol);
+    else tft.fillCircle(px, py, (i % 2) + 1, pCol);
   }
 
   tft.setTextSize(2);
@@ -386,9 +433,21 @@ void dibujarModoPlanta() {
   tft.setCursor(12, 36);
   tft.printf("FASE: %s", cult.fase);
   tft.setCursor(12, 50);
-  tft.printf("%d ppm  %.1f mS", cult.ppm, cult.mS);
-  tft.drawRect(12, 64, 140, 10, MI_GRIS);
-  tft.fillRect(13, 65, (int)(138 * cult.progreso), 8, cult.colorFase);
+  tft.printf("%d ppm  %.1f mS  %02d:%02d", cult.ppm, cult.mS, hayHora ? ti.tm_hour : 0, hayHora ? ti.tm_min : 0);
+  tft.drawRect(12, 64, 90, 7, MI_GRIS); tft.fillRect(13, 65, (statsVivas.agua * 88) / 100, 5, MI_CIAN);
+  tft.drawRect(12, 74, 90, 7, MI_GRIS); tft.fillRect(13, 75, (statsVivas.felicidad * 88) / 100, 5, MI_AMARILLO);
+  tft.drawRect(12, 84, 90, 7, MI_GRIS); tft.fillRect(13, 85, (statsVivas.salud * 88) / 100, 5, MI_VERDE);
+  tft.drawRect(12, 94, 90, 7, MI_GRIS); tft.fillRect(13, 95, (statsVivas.energia * 88) / 100, 5, MI_BLANCO);
+  tft.drawRect(208, 10, 100, 60, MI_GRIS);
+  tft.setCursor(212, 14); tft.print("RPG");
+  tft.setCursor(212, 26); tft.printf("GEN %d", statsRpg.genetica);
+  tft.setCursor(212, 36); tft.printf("VIG %d", statsRpg.vigor);
+  tft.setCursor(212, 46); tft.printf("RES %d", statsRpg.resina);
+  tft.setCursor(212, 56); tft.printf("TER %d", statsRpg.terpenos);
+  if (ahora - msCambioFase < 900) for (int i = 0; i < 7; i++) tft.fillCircle(130 + i * 8, 110 + ((i % 2) ? 3 : 0), 2, MI_BLANCO);
+  if (animo == ANIMO_DORMIDA) { tft.setCursor(cx + 22, baseY - alto - 28); tft.print("Zz"); }
+  if (ahora - msMensajeEvento < 2500) { tft.setTextColor(MI_AMARILLO); tft.setCursor(12, 108); tft.print(mensajeEvento); }
+  for (int y = 0; y < 240; y += 4) tft.drawFastHLine(0, y, 320, 0x0841);
 }
 
 void guardarFechasPrefs() {
@@ -495,6 +554,24 @@ void setup() {
   fechaVeg.d = prefs.getInt("vegDia", 10); fechaVeg.m = prefs.getInt("vegMes", 7); fechaVeg.a = prefs.getInt("vegAnio", 2026);
   fechaFlor.d = prefs.getInt("florDia", 15); fechaFlor.m = prefs.getInt("florMes", 9); fechaFlor.a = prefs.getInt("florAnio", 2026);
   validarFechasConfig();
+  rpgInicializado = prefs.getBool("rpgInit", false);
+  if (!rpgInicializado) {
+    randomSeed(esp_random());
+    statsRpg.genetica = random(75, 101);
+    statsRpg.vigor = random(70, 100);
+    statsRpg.resina = random(60, 100);
+    statsRpg.terpenos = random(65, 100);
+    prefs.putUChar("rpgGen", statsRpg.genetica);
+    prefs.putUChar("rpgVig", statsRpg.vigor);
+    prefs.putUChar("rpgRes", statsRpg.resina);
+    prefs.putUChar("rpgTer", statsRpg.terpenos);
+    prefs.putBool("rpgInit", true);
+  } else {
+    statsRpg.genetica = prefs.getUChar("rpgGen", 85);
+    statsRpg.vigor = prefs.getUChar("rpgVig", 85);
+    statsRpg.resina = prefs.getUChar("rpgRes", 85);
+    statsRpg.terpenos = prefs.getUChar("rpgTer", 85);
+  }
 
   WiFi.begin(SSID, PASSWORD);
   unsigned long inicioIntento = millis(); while (WiFi.status() != WL_CONNECTED && millis() - inicioIntento < 15000) delay(120);
