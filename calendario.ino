@@ -11,6 +11,7 @@
 #define ENC_S1     2
 #define ENC_S2     3
 #define BTN_KEY    4
+#define TTP223_PIN  5
 
 #define MI_NEGRO    0x0000
 #define MI_BLANCO   0xFFFF
@@ -67,7 +68,18 @@ const unsigned long HOLD_PLANTA_MS = 5000;
 unsigned long ultimoFramePlanta = 0;
 const unsigned long FRAME_MS = 80;
 bool fondoPlantaDibujado = false;
+bool ultimoEsDiaRender = true;
 uint8_t framePlanta = 0;
+bool animacionFeliz = false;
+bool animacionRiego = false;
+unsigned long inicioAnimacionFeliz = 0;
+unsigned long inicioAnimacionRiego = 0;
+unsigned long inicioTouchTTP223 = 0;
+bool touchActivoTTP223 = false;
+uint8_t interaccionesPlanta = 0;
+const unsigned long DURACION_ANIMACION_FELIZ_MS = 1200;
+const unsigned long DURACION_ANIMACION_RIEGO_MS = 2500;
+const unsigned long TOUCH_LARGO_TTP223_MS = 700;
 enum EstadoAnimoPlanta { ANIMO_FELIZ, ANIMO_TRISTE, ANIMO_DORMIDA, ANIMO_ESTRESADA };
 struct StatsVivas { uint8_t agua, felicidad, salud, energia; };
 struct StatsRPG { uint8_t genetica, vigor, resina, terpenos; };
@@ -291,6 +303,43 @@ void mostrarMensajeEvento(const char* txt) {
   msMensajeEvento = millis();
 }
 
+void iniciarAnimacionFeliz() {
+  animacionFeliz = true;
+  inicioAnimacionFeliz = millis();
+  interaccionesPlanta = min<uint8_t>(interaccionesPlanta + 1, 25);
+  if (statsVivas.felicidad < 100) statsVivas.felicidad = min(100, statsVivas.felicidad + 3);
+}
+
+void iniciarAnimacionRiego() {
+  animacionRiego = true;
+  inicioAnimacionRiego = millis();
+  interaccionesPlanta = min<uint8_t>(interaccionesPlanta + 2, 25);
+  if (statsVivas.agua < 100) statsVivas.agua = min(100, statsVivas.agua + 6);
+  if (statsVivas.felicidad < 100) statsVivas.felicidad = min(100, statsVivas.felicidad + 5);
+}
+
+void actualizarAnimacionesPlanta(unsigned long ahora) {
+  if (animacionFeliz && (ahora - inicioAnimacionFeliz > DURACION_ANIMACION_FELIZ_MS)) animacionFeliz = false;
+  if (animacionRiego && (ahora - inicioAnimacionRiego > DURACION_ANIMACION_RIEGO_MS)) animacionRiego = false;
+}
+
+void procesarTouchTTP223(unsigned long ahora) {
+  if (!modoPlanta) {
+    touchActivoTTP223 = false;
+    return;
+  }
+  bool tocando = (digitalRead(TTP223_PIN) == HIGH);
+  if (tocando && !touchActivoTTP223) {
+    touchActivoTTP223 = true;
+    inicioTouchTTP223 = ahora;
+  } else if (!tocando && touchActivoTTP223) {
+    unsigned long duracion = ahora - inicioTouchTTP223;
+    if (duracion >= TOUCH_LARGO_TTP223_MS) iniciarAnimacionRiego();
+    else iniciarAnimacionFeliz();
+    touchActivoTTP223 = false;
+  }
+}
+
 StatsVivas calcularStatsVivas(const InfoCultivo &cult) {
   StatsVivas s;
   s.agua = cult.tocaRegar ? 30 : 92;
@@ -332,15 +381,21 @@ void dibujarModoPlanta() {
   sway -= 2;
   bool ojosAbiertos = esDia && ((ahora / 2300) % 8) != 0;
   int brillo = ((ahora / 180) % 6);
+  int bonusAlegria = min(10, interaccionesPlanta / 2);
   int frameHojas = framePlanta % 3;
 
-  tft.fillScreen(esDia ? MI_AZUL_OSC : MI_NEGRO);
-  if (!esDia) {
-    tft.fillCircle(278, 20, 10, MI_AMARILLO);
-    for (int i = 0; i < 20; i++) tft.fillCircle((i * 17 + (ahora / 80)) % 320, (i * 19) % 90, 1, MI_BLANCO);
+  if (!fondoPlantaDibujado || esDia != ultimoEsDiaRender) {
+    tft.fillScreen(esDia ? MI_AZUL_OSC : MI_NEGRO);
+    if (!esDia) {
+      tft.fillCircle(278, 20, 10, MI_AMARILLO);
+      for (int i = 0; i < 20; i++) tft.fillCircle((i * 17) % 320, (i * 19) % 90, 1, MI_BLANCO);
+    }
+    tft.fillRect(130, 150, 60, 40, 0x526A);
+    tft.fillRect(10, 8, 220, 70, MI_NEGRO);
+    fondoPlantaDibujado = true;
+    ultimoEsDiaRender = esDia;
   }
   tft.fillRect(90, 72, 140, 118, esDia ? MI_AZUL_OSC : MI_NEGRO);
-  tft.fillRect(130, 150, 60, 40, 0x526A);
   tft.fillRect(10, 8, 220, 70, MI_NEGRO);
 
   EstadoAnimoPlanta animo = !esDia ? ANIMO_DORMIDA : (statsVivas.salud < 70 ? ANIMO_ESTRESADA : (statsVivas.agua < 50 ? ANIMO_TRISTE : ANIMO_FELIZ));
@@ -354,7 +409,8 @@ void dibujarModoPlanta() {
   else if (cult.progreso < 0.85f) etapaVisual = 5;
   else etapaVisual = 6;
 
-  tft.fillRect(cx - 3, baseY - alto, 6, alto, animo == ANIMO_ESTRESADA ? 0x03E0 : MI_VERDE);
+  uint16_t verdeVivo = (uint16_t)min(0x07E0, MI_VERDE + bonusAlegria * 32);
+  tft.fillRect(cx - 3, baseY - alto, 6, alto, animo == ANIMO_ESTRESADA ? 0x03E0 : verdeVivo);
   tft.drawBitmap(cx - 16, baseY - alto - 22, SPRITE_PLANTA_BASE, 32, 32, MI_VERDE);
   tft.fillCircle(cx - 12, baseY - alto + (animo == ANIMO_TRISTE ? 16 : 12), 8, MI_VERDE);
   tft.fillCircle(cx + 12, baseY - alto + (animo == ANIMO_TRISTE ? 16 : 12), 8, MI_VERDE);
@@ -445,9 +501,39 @@ void dibujarModoPlanta() {
   tft.setCursor(212, 46); tft.printf("RES %d", statsRpg.resina);
   tft.setCursor(212, 56); tft.printf("TER %d", statsRpg.terpenos);
   if (ahora - msCambioFase < 900) for (int i = 0; i < 7; i++) tft.fillCircle(130 + i * 8, 110 + ((i % 2) ? 3 : 0), 2, MI_BLANCO);
+
+  if (animacionFeliz) {
+    tft.drawLine(cx - 6, baseY - alto + 3, cx - 2, baseY - alto + 6, MI_NEGRO);
+    tft.drawLine(cx + 2, baseY - alto + 6, cx + 6, baseY - alto + 3, MI_NEGRO);
+    tft.drawLine(cx - 6, baseY - alto + 10, cx, baseY - alto + 14, MI_NEGRO);
+    tft.drawLine(cx, baseY - alto + 14, cx + 6, baseY - alto + 10, MI_NEGRO);
+    for (int i = 0; i < 5; i++) {
+      int hx = cx - 26 + i * 12;
+      int hy = 126 - ((int)((ahora / 70 + i * 5) % 18));
+      tft.fillCircle(hx, hy, 2, MI_ROJO);
+      tft.drawPixel(hx - 2, hy, MI_ROJO); tft.drawPixel(hx + 2, hy, MI_ROJO);
+      tft.drawPixel(hx, hy - 2, MI_ROJO); tft.drawPixel(hx, hy + 2, MI_ROJO);
+    }
+    for (int i = 0; i < 10; i++) {
+      int sx = (i * 29 + (int)(ahora / 20)) % 320;
+      int sy = 95 + ((i * 11 + (int)(ahora / 35)) % 55);
+      tft.drawPixel(sx, sy, MI_VERDE);
+      tft.drawPixel(sx + 1, sy, MI_BLANCO);
+    }
+  }
+
+  if (animacionRiego) {
+    for (int i = 0; i < 26; i++) {
+      int gx = (i * 13 + (int)(ahora / 12)) % 320;
+      int gy = 78 + ((i * 19 + (int)(ahora / 9)) % 108);
+      tft.drawLine(gx, gy, gx, gy + 3, MI_CIAN);
+    }
+    tft.fillCircle(cx - 24, baseY - alto - 16, 4, MI_CIAN);
+    tft.fillCircle(cx + 24, baseY - alto - 16, 4, MI_CIAN);
+    tft.fillCircle(cx, baseY - alto - 24, 5, MI_CIAN);
+  }
   if (animo == ANIMO_DORMIDA) { tft.setCursor(cx + 22, baseY - alto - 28); tft.print("Zz"); }
   if (ahora - msMensajeEvento < 2500) { tft.setTextColor(MI_AMARILLO); tft.setCursor(12, 108); tft.print(mensajeEvento); }
-  for (int y = 0; y < 240; y += 4) tft.drawFastHLine(0, y, 320, 0x0841);
 }
 
 void guardarFechasPrefs() {
@@ -546,6 +632,7 @@ void actualizarFechaSiEsPosible() {
 void setup() {
   Serial.begin(115200); SPI.begin(12, 13, 11);
   pinMode(ENC_S1, INPUT_PULLUP); pinMode(ENC_S2, INPUT_PULLUP); pinMode(BTN_KEY, INPUT_PULLUP);
+  pinMode(TTP223_PIN, INPUT);
   ultimoEstadoAB = (digitalRead(ENC_S1) << 1) | digitalRead(ENC_S2);
   ultimoEstadoBtn = (digitalRead(BTN_KEY) == LOW);
   tft.init(240, 320); tft.setRotation(1); tft.invertDisplay(false);
@@ -592,8 +679,11 @@ void loop() {
   actualizarEncoder();
   consumirEncoder();
 
+  unsigned long ahora = millis();
+  procesarTouchTTP223(ahora);
+  actualizarAnimacionesPlanta(ahora);
+
   if (modoPlanta) {
-    unsigned long ahora = millis();
     if (ahora - ultimoFramePlanta >= FRAME_MS) {
       ultimoFramePlanta = ahora;
       framePlanta++;
