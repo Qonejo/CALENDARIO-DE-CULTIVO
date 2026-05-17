@@ -2,6 +2,7 @@
 #include <Adafruit_ST7789.h>
 #include <SPI.h>
 #include <WiFi.h>
+#include <esp_now.h>
 #include <time.h>
 #include <Preferences.h>
 
@@ -33,6 +34,25 @@ struct InfoCultivo {
   bool tocaRegar;
   bool tocaFertilizar;
 };
+
+typedef struct struct_message {
+
+    int lightHours;
+    int darkHours;
+
+    int daysVeg;
+    int daysFlower;
+
+    bool isVegetative;
+    bool inLightMode;
+
+    float progressPercent;
+
+    int hour;
+    int minute;
+    int second;
+
+} struct_message;
 
 enum EstadoUI { UI_CALENDARIO, UI_CONFIG, UI_EDITANDO };
 
@@ -89,6 +109,16 @@ char faseAnterior[10] = "";
 char mensajeEvento[26] = "";
 unsigned long msCambioFase = 0, msMensajeEvento = 0;
 bool rpgInicializado = false;
+struct_message outgoingData;
+uint8_t macCentro[] = {
+    0x94,
+    0xA9,
+    0x90,
+    0x37,
+    0x7A,
+    0xEC
+};
+unsigned long lastEspNowSendMs = 0;
 
 struct Particula { int x; int y; int oldX; int oldY; int vx; int vy; uint16_t color; bool activa; };
 Particula viento[12];
@@ -781,6 +811,64 @@ void actualizarFechaSiEsPosible() {
   if (millis() - ultimoIntentoNtpMs > 600000UL) { configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, "pool.ntp.org", "time.nist.gov"); ultimoIntentoNtpMs = millis(); }
 }
 
+void enviarDatosEspNow() {
+  struct tm ti;
+  bool hayHora = getLocalTime(&ti, 10);
+  int hour = hayHora ? ti.tm_hour : 0;
+  int minute = hayHora ? ti.tm_min : 0;
+  int second = hayHora ? ti.tm_sec : 0;
+
+  FechaConfig hoy = {diaHoy, mesHoy + 1, anioHoy};
+  time_t tHoy = fechaToTime(hoy);
+  time_t tVeg = fechaToTime(fechaVeg);
+  time_t tFlor = fechaToTime(fechaFlor);
+
+  int daysVeg = max(0, (int)((tHoy - tVeg) / 86400));
+  int daysFlower = 0;
+  bool isVegetative = (tHoy < tFlor);
+  if (!isVegetative) {
+    daysFlower = max(0, (int)((tHoy - tFlor) / 86400));
+  }
+
+  int lightHours = isVegetative ? 18 : 12;
+  int darkHours = isVegetative ? 6 : 12;
+  bool inLightMode = (hour >= 0 && hour < lightHours);
+
+  InfoCultivo cult = calcularCultivo(diaHoy, mesHoy, anioHoy);
+  outgoingData.lightHours = lightHours;
+  outgoingData.darkHours = darkHours;
+  outgoingData.daysVeg = daysVeg;
+  outgoingData.daysFlower = daysFlower;
+  outgoingData.isVegetative = isVegetative;
+  outgoingData.inLightMode = inLightMode;
+  outgoingData.progressPercent = cult.progreso;
+  outgoingData.hour = hour;
+  outgoingData.minute = minute;
+  outgoingData.second = second;
+
+  esp_now_send(
+      macCentro,
+      (uint8_t *)&outgoingData,
+      sizeof(outgoingData)
+  );
+
+  Serial.println("=== ESP NOW SEND ===");
+  Serial.print("VEG DAYS: ");
+  Serial.println(outgoingData.daysVeg);
+  Serial.print("FLOWER DAYS: ");
+  Serial.println(outgoingData.daysFlower);
+  Serial.print("VEGETATIVE: ");
+  Serial.println(outgoingData.isVegetative);
+  Serial.print("LIGHT MODE: ");
+  Serial.println(outgoingData.inLightMode);
+  Serial.print("TIME: ");
+  Serial.print(outgoingData.hour);
+  Serial.print(":");
+  Serial.print(outgoingData.minute);
+  Serial.print(":");
+  Serial.println(outgoingData.second);
+}
+
 void setup() {
   Serial.begin(115200); SPI.begin(12, 13, 11);
   pinMode(ENC_S1, INPUT_PULLUP); pinMode(ENC_S2, INPUT_PULLUP); pinMode(BTN_KEY, INPUT_PULLUP);
@@ -812,6 +900,22 @@ void setup() {
     statsRpg.terpenos = prefs.getUChar("rpgTer", 85);
   }
 
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+
+    Serial.println("ESP-NOW ERROR");
+  } else {
+    esp_now_peer_info_t peerInfo = {};
+
+    memcpy(peerInfo.peer_addr, macCentro, 6);
+
+    peerInfo.channel = 0;
+
+    peerInfo.encrypt = false;
+
+    esp_now_add_peer(&peerInfo);
+  }
+
   WiFi.begin(SSID, PASSWORD);
   unsigned long inicioIntento = millis(); while (WiFi.status() != WL_CONNECTED && millis() - inicioIntento < 15000) delay(120);
   wifiConectado = (WiFi.status() == WL_CONNECTED);
@@ -833,6 +937,10 @@ void loop() {
   consumirEncoder();
 
   unsigned long ahora = millis();
+  if (millis() - lastEspNowSendMs >= 1000) {
+    lastEspNowSendMs = millis();
+    enviarDatosEspNow();
+  }
   procesarTouchTTP223(ahora);
   actualizarAnimacionesPlanta(ahora);
 
