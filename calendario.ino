@@ -1,6 +1,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <SPI.h>
+#include <SD.h>
 #include <WiFi.h>
 #include <esp_now.h>
 #include <time.h>
@@ -13,6 +14,7 @@
 #define ENC_S2     3
 #define BTN_KEY    4
 #define TTP223_PIN  5
+#define SD_CS       6
 
 #define MI_NEGRO    0x0000
 #define MI_BLANCO   0xFFFF
@@ -65,6 +67,9 @@ enum CampoConfig {
 Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 Preferences prefs;
 
+const char* CONFIG_SD_PATH = "/cultivo.cfg";
+bool sdDisponible = false;
+
 const char* SSID = "IZZI-367E";
 const char* PASSWORD = "ehwa3pX7btcw";
 
@@ -96,10 +101,13 @@ unsigned long inicioAnimacionFeliz = 0;
 unsigned long inicioAnimacionRiego = 0;
 unsigned long inicioTouchTTP223 = 0;
 bool touchActivoTTP223 = false;
+bool ultimoEstadoTouch = false;
+unsigned long ultimoTouchMs = 0;
 uint8_t interaccionesPlanta = 0;
 const unsigned long DURACION_ANIMACION_FELIZ_MS = 1200;
 const unsigned long DURACION_ANIMACION_RIEGO_MS = 2500;
 const unsigned long TOUCH_LARGO_TTP223_MS = 700;
+const unsigned long DEBOUNCE_TOUCH_MS = 70;
 enum EstadoAnimoPlanta { ANIMO_FELIZ, ANIMO_TRISTE, ANIMO_DORMIDA, ANIMO_ESTRESADA };
 struct StatsVivas { uint8_t agua, felicidad, salud, energia; };
 struct StatsRPG { uint8_t genetica, vigor, resina, terpenos; };
@@ -385,22 +393,37 @@ void actualizarAnimacionesPlanta(unsigned long ahora) {
   if (animacionRiego && (ahora - inicioAnimacionRiego > DURACION_ANIMACION_RIEGO_MS)) animacionRiego = false;
 }
 
+void abrirOpcionesConTouch() {
+  modoPlanta = false;
+  fondoPlantaDibujado = false;
+  estadoUI = UI_CONFIG;
+  indiceCfg = CAMPO_VEG_DIA;
+  necesitaRedibujar = true;
+}
+
 void procesarTouchTTP223(unsigned long ahora) {
-  if (!modoPlanta) {
-    touchActivoTTP223 = false;
-    return;
-  }
   bool tocando = (digitalRead(TTP223_PIN) == HIGH);
-  if (tocando && !touchActivoTTP223) {
-    touchActivoTTP223 = true;
-    inicioTouchTTP223 = ahora;
-  } else if (!tocando && touchActivoTTP223) {
-    unsigned long duracion = ahora - inicioTouchTTP223;
-    if (duracion >= TOUCH_LARGO_TTP223_MS) iniciarAnimacionRiego();
-    else iniciarAnimacionFeliz();
-    touchActivoTTP223 = false;
+
+  if (tocando != ultimoEstadoTouch && (ahora - ultimoTouchMs) >= DEBOUNCE_TOUCH_MS) {
+    ultimoTouchMs = ahora;
+    ultimoEstadoTouch = tocando;
+
+    if (tocando) {
+      touchActivoTTP223 = true;
+      inicioTouchTTP223 = ahora;
+    } else if (touchActivoTTP223) {
+      unsigned long duracion = ahora - inicioTouchTTP223;
+      if (modoPlanta) {
+        if (duracion >= TOUCH_LARGO_TTP223_MS) iniciarAnimacionRiego();
+        else iniciarAnimacionFeliz();
+      } else if (estadoUI == UI_CALENDARIO) {
+        abrirOpcionesConTouch();
+      }
+      touchActivoTTP223 = false;
+    }
   }
 }
+
 
 StatsVivas calcularStatsVivas(const InfoCultivo &cult) {
   StatsVivas s;
@@ -456,6 +479,7 @@ void actualizarStatsRpgLentas(const InfoCultivo &cult, unsigned long ahora) {
     prefs.putUChar("rpgVig", statsRpg.vigor);
     prefs.putUChar("rpgRes", statsRpg.resina);
     prefs.putUChar("rpgTer", statsRpg.terpenos);
+    guardarConfigSD();
     ultimoGuardadoRpgMs = ahora;
   }
 }
@@ -718,9 +742,79 @@ void dibujarModoPlanta() {
   if (ahora - msMensajeEvento < 2500) { tft.setTextColor(MI_AMARILLO); tft.setCursor(12, 108); tft.print(mensajeEvento); }
 }
 
+
+bool parseLineaConfigSD(const String &linea, String &clave, String &valor) {
+  int separador = linea.indexOf('=');
+  if (separador <= 0) return false;
+  clave = linea.substring(0, separador);
+  valor = linea.substring(separador + 1);
+  clave.trim();
+  valor.trim();
+  return clave.length() > 0 && valor.length() > 0;
+}
+
+bool cargarConfigSD() {
+  if (!sdDisponible || !SD.exists(CONFIG_SD_PATH)) return false;
+
+  File archivo = SD.open(CONFIG_SD_PATH, FILE_READ);
+  if (!archivo) return false;
+
+  while (archivo.available()) {
+    String linea = archivo.readStringUntil('\n');
+    String clave, valor;
+    if (!parseLineaConfigSD(linea, clave, valor)) continue;
+
+    int numero = valor.toInt();
+    if (clave == "vegDia") fechaVeg.d = numero;
+    else if (clave == "vegMes") fechaVeg.m = numero;
+    else if (clave == "vegAnio") fechaVeg.a = numero;
+    else if (clave == "florDia") fechaFlor.d = numero;
+    else if (clave == "florMes") fechaFlor.m = numero;
+    else if (clave == "florAnio") fechaFlor.a = numero;
+    else if (clave == "rpgGen") statsRpg.genetica = constrain(numero, 0, 100);
+    else if (clave == "rpgVig") statsRpg.vigor = constrain(numero, 0, 100);
+    else if (clave == "rpgRes") statsRpg.resina = constrain(numero, 0, 100);
+    else if (clave == "rpgTer") statsRpg.terpenos = constrain(numero, 0, 100);
+    else if (clave == "rpgInit") rpgInicializado = (numero != 0);
+  }
+
+  archivo.close();
+  validarFechasConfig();
+  return true;
+}
+
+bool guardarConfigSD() {
+  if (!sdDisponible) return false;
+
+  if (SD.exists(CONFIG_SD_PATH)) SD.remove(CONFIG_SD_PATH);
+  File archivo = SD.open(CONFIG_SD_PATH, FILE_WRITE);
+  if (!archivo) return false;
+
+  archivo.printf("vegDia=%d\n", fechaVeg.d);
+  archivo.printf("vegMes=%d\n", fechaVeg.m);
+  archivo.printf("vegAnio=%d\n", fechaVeg.a);
+  archivo.printf("florDia=%d\n", fechaFlor.d);
+  archivo.printf("florMes=%d\n", fechaFlor.m);
+  archivo.printf("florAnio=%d\n", fechaFlor.a);
+  archivo.printf("rpgInit=%d\n", rpgInicializado ? 1 : 0);
+  archivo.printf("rpgGen=%d\n", statsRpg.genetica);
+  archivo.printf("rpgVig=%d\n", statsRpg.vigor);
+  archivo.printf("rpgRes=%d\n", statsRpg.resina);
+  archivo.printf("rpgTer=%d\n", statsRpg.terpenos);
+  archivo.close();
+  return true;
+}
+
+void inicializarSD() {
+  sdDisponible = SD.begin(SD_CS);
+  Serial.print("SD: ");
+  Serial.println(sdDisponible ? "OK" : "NO DISPONIBLE");
+}
+
 void guardarFechasPrefs() {
   prefs.putInt("vegDia", fechaVeg.d); prefs.putInt("vegMes", fechaVeg.m); prefs.putInt("vegAnio", fechaVeg.a);
   prefs.putInt("florDia", fechaFlor.d); prefs.putInt("florMes", fechaFlor.m); prefs.putInt("florAnio", fechaFlor.a);
+  guardarConfigSD();
 }
 
 void editarCampo(int dir) {
@@ -740,13 +834,19 @@ void aplicarPasoEncoder(int8_t dir) {
 }
 
 void manejarConfirmacion() {
-  if (estadoUI == UI_CALENDARIO) { estadoUI = UI_CONFIG; indiceCfg = CAMPO_VEG_DIA; }
-  else if (estadoUI == UI_CONFIG) {
-    if (indiceCfg == CAMPO_VOLVER) { validarFechasConfig(); guardarFechasPrefs(); estadoUI = UI_CALENDARIO; }
-    else estadoUI = UI_EDITANDO;
+  if (estadoUI == UI_CALENDARIO) return;
+
+  if (estadoUI == UI_CONFIG) {
+    if (indiceCfg == CAMPO_VOLVER) {
+      validarFechasConfig();
+      guardarFechasPrefs();
+      estadoUI = UI_CALENDARIO;
+    } else {
+      estadoUI = UI_EDITANDO;
+    }
   } else {
-    validarFechasConfig(); guardarFechasPrefs();
-    if (indiceCfg < CAMPO_FLOR_ANIO) indiceCfg++; else indiceCfg = CAMPO_VOLVER;
+    validarFechasConfig();
+    guardarFechasPrefs();
     estadoUI = UI_CONFIG;
   }
   necesitaRedibujar = true;
@@ -878,9 +978,9 @@ void setup() {
   tft.init(240, 320); tft.setRotation(1); tft.invertDisplay(false);
 
   prefs.begin("cultivo", false);
+  inicializarSD();
   fechaVeg.d = prefs.getInt("vegDia", 10); fechaVeg.m = prefs.getInt("vegMes", 7); fechaVeg.a = prefs.getInt("vegAnio", 2026);
   fechaFlor.d = prefs.getInt("florDia", 15); fechaFlor.m = prefs.getInt("florMes", 9); fechaFlor.a = prefs.getInt("florAnio", 2026);
-  validarFechasConfig();
   rpgInicializado = prefs.getBool("rpgInit", false);
   if (!rpgInicializado) {
     randomSeed(esp_random());
@@ -898,6 +998,13 @@ void setup() {
     statsRpg.vigor = prefs.getUChar("rpgVig", 85);
     statsRpg.resina = prefs.getUChar("rpgRes", 85);
     statsRpg.terpenos = prefs.getUChar("rpgTer", 85);
+  }
+
+  if (cargarConfigSD()) {
+    Serial.println("Config cargada desde SD");
+  } else {
+    validarFechasConfig();
+    guardarConfigSD();
   }
 
   WiFi.mode(WIFI_STA);
