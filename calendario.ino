@@ -99,6 +99,8 @@ unsigned long inicioAnimacionRiego = 0;
 bool touchActivoTTP223 = false;
 bool ultimoEstadoTouch = false;
 unsigned long ultimoTouchMs = 0;
+unsigned long inicioTouchMs = 0;
+bool salidaConfigPorTouchLargo = false;
 uint8_t interaccionesPlanta = 0;
 const unsigned long DURACION_ANIMACION_FELIZ_MS = 1200;
 const unsigned long DURACION_ANIMACION_RIEGO_MS = 2500;
@@ -136,10 +138,13 @@ int16_t deltaEncoder = 0;
 uint8_t ultimoEstadoAB = 0;
 int8_t acumuladorEncoder = 0;
 bool ultimoEstadoBtn = false;
-unsigned long ultimoMsEncoder = 0, ultimoBtnMs = 0;
+unsigned long ultimoMsEncoder = 0, ultimoPasoEncoderMs = 0, ultimoBtnMs = 0;
 
-const unsigned long DEBOUNCE_ENCODER_MS = 2;
+const unsigned long DEBOUNCE_ENCODER_MS = 4;
 const unsigned long DEBOUNCE_BTN_MS = 70;
+const unsigned long INTERVALO_PASO_ENCODER_MS = 120;
+const unsigned long TOUCH_SALIR_CONFIG_MS = 3000;
+const int8_t TRANSICIONES_POR_PASO_ENCODER = 8;
 
 const int8_t TABLA_ENCODER[16] = {
    0, -1,  1,  0,
@@ -396,6 +401,13 @@ void abrirMenuOpciones() {
   necesitaRedibujar = true;
 }
 
+void salirMenuConfig() {
+  validarFechasConfig();
+  guardarFechasPrefs();
+  estadoUI = UI_CALENDARIO;
+  necesitaRedibujar = true;
+}
+
 void procesarTouchTTP223(unsigned long ahora) {
   bool tocando = (digitalRead(TTP223_PIN) == HIGH);
 
@@ -405,10 +417,21 @@ void procesarTouchTTP223(unsigned long ahora) {
 
     if (tocando) {
       touchActivoTTP223 = true;
+      inicioTouchMs = ahora;
+      salidaConfigPorTouchLargo = false;
     } else if (touchActivoTTP223) {
-      abrirMenuOpciones();
+      if (!salidaConfigPorTouchLargo && estadoUI == UI_CALENDARIO) {
+        abrirMenuOpciones();
+      }
       touchActivoTTP223 = false;
     }
+  }
+
+  if (touchActivoTTP223 && !salidaConfigPorTouchLargo && estadoUI != UI_CALENDARIO &&
+      (ahora - inicioTouchMs) >= TOUCH_SALIR_CONFIG_MS) {
+    salidaConfigPorTouchLargo = true;
+    touchActivoTTP223 = false;
+    salirMenuConfig();
   }
 }
 
@@ -826,9 +849,7 @@ void manejarConfirmacion() {
 
   if (estadoUI == UI_CONFIG) {
     if (indiceCfg == CAMPO_VOLVER) {
-      validarFechasConfig();
-      guardarFechasPrefs();
-      estadoUI = UI_CALENDARIO;
+      salirMenuConfig();
     } else {
       estadoUI = UI_EDITANDO;
     }
@@ -852,12 +873,14 @@ void actualizarEncoder() {
 
     if (movimiento != 0) {
       acumuladorEncoder += movimiento;
-      if (acumuladorEncoder >= 4) {
+      if (acumuladorEncoder >= TRANSICIONES_POR_PASO_ENCODER && (ahora - ultimoPasoEncoderMs) >= INTERVALO_PASO_ENCODER_MS) {
         deltaEncoder++;
         acumuladorEncoder = 0;
-      } else if (acumuladorEncoder <= -4) {
+        ultimoPasoEncoderMs = ahora;
+      } else if (acumuladorEncoder <= -TRANSICIONES_POR_PASO_ENCODER && (ahora - ultimoPasoEncoderMs) >= INTERVALO_PASO_ENCODER_MS) {
         deltaEncoder--;
         acumuladorEncoder = 0;
+        ultimoPasoEncoderMs = ahora;
       }
     }
     ultimoEstadoAB = estadoActual;
