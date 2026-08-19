@@ -87,9 +87,6 @@ const long GMT_OFFSET_SEC = -21600;
 const int DAYLIGHT_OFFSET_SEC = 0;
 bool modoPlanta = false;
 bool botonPresionado = false;
-bool longPressDetectado = false;
-unsigned long tiempoPresionado = 0;
-const unsigned long HOLD_PLANTA_MS = 5000;
 unsigned long ultimoFramePlanta = 0;
 const unsigned long FRAME_MS = 80;
 bool fondoPlantaDibujado = false;
@@ -99,14 +96,12 @@ bool animacionFeliz = false;
 bool animacionRiego = false;
 unsigned long inicioAnimacionFeliz = 0;
 unsigned long inicioAnimacionRiego = 0;
-unsigned long inicioTouchTTP223 = 0;
 bool touchActivoTTP223 = false;
 bool ultimoEstadoTouch = false;
 unsigned long ultimoTouchMs = 0;
 uint8_t interaccionesPlanta = 0;
 const unsigned long DURACION_ANIMACION_FELIZ_MS = 1200;
 const unsigned long DURACION_ANIMACION_RIEGO_MS = 2500;
-const unsigned long TOUCH_LARGO_TTP223_MS = 700;
 const unsigned long DEBOUNCE_TOUCH_MS = 70;
 enum EstadoAnimoPlanta { ANIMO_FELIZ, ANIMO_TRISTE, ANIMO_DORMIDA, ANIMO_ESTRESADA };
 struct StatsVivas { uint8_t agua, felicidad, salud, energia; };
@@ -393,7 +388,7 @@ void actualizarAnimacionesPlanta(unsigned long ahora) {
   if (animacionRiego && (ahora - inicioAnimacionRiego > DURACION_ANIMACION_RIEGO_MS)) animacionRiego = false;
 }
 
-void abrirOpcionesConTouch() {
+void abrirMenuOpciones() {
   modoPlanta = false;
   fondoPlantaDibujado = false;
   estadoUI = UI_CONFIG;
@@ -410,15 +405,8 @@ void procesarTouchTTP223(unsigned long ahora) {
 
     if (tocando) {
       touchActivoTTP223 = true;
-      inicioTouchTTP223 = ahora;
     } else if (touchActivoTTP223) {
-      unsigned long duracion = ahora - inicioTouchTTP223;
-      if (modoPlanta) {
-        if (duracion >= TOUCH_LARGO_TTP223_MS) iniciarAnimacionRiego();
-        else iniciarAnimacionFeliz();
-      } else if (estadoUI == UI_CALENDARIO) {
-        abrirOpcionesConTouch();
-      }
+      abrirMenuOpciones();
       touchActivoTTP223 = false;
     }
   }
@@ -881,34 +869,44 @@ void actualizarEncoder() {
     ultimoEstadoBtn = estadoBtn;
     if (estadoBtn) {
       botonPresionado = true;
-      longPressDetectado = false;
-      tiempoPresionado = ahora;
     } else {
-      if (botonPresionado && !longPressDetectado) manejarConfirmacion();
+      if (botonPresionado) manejarConfirmacion();
       botonPresionado = false;
-      longPressDetectado = false;
     }
-  }
-
-  if (botonPresionado && estadoBtn && !longPressDetectado && (ahora - tiempoPresionado >= HOLD_PLANTA_MS)) {
-    modoPlanta = !modoPlanta;
-    longPressDetectado = true;
-    necesitaRedibujar = !modoPlanta;
-    fondoPlantaDibujado = false;
   }
 }
 void consumirEncoder(){ if(modoPlanta){deltaEncoder=0;return;} int8_t p=deltaEncoder; if(!p)return; deltaEncoder=0; while(p>0){aplicarPasoEncoder(1);p--;} while(p<0){aplicarPasoEncoder(-1);p++;} }
 
 void actualizarFechaSiEsPosible() {
-  if (WiFi.status() != WL_CONNECTED) { wifiConectado = false; if (millis()-ultimoIntentoWifiMs>30000UL){ WiFi.begin(SSID, PASSWORD); ultimoIntentoWifiMs=millis(); } return; }
-  wifiConectado = true;
-  struct tm ti;
-  if (getLocalTime(&ti, 50)) {
-    int nd = ti.tm_mday, nm = ti.tm_mon, na = 1900 + ti.tm_year;
-    if (nd != diaHoy || nm != mesHoy || na != anioHoy) { diaHoy = nd; mesHoy = nm; anioHoy = na; necesitaRedibujar = true; }
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiConectado = true;
+    struct tm ti;
+    if (getLocalTime(&ti, 50)) {
+      int nd = ti.tm_mday, nm = ti.tm_mon, na = 1900 + ti.tm_year;
+      if (nd != diaHoy || nm != mesHoy || na != anioHoy) {
+        diaHoy = nd;
+        mesHoy = nm;
+        anioHoy = na;
+        necesitaRedibujar = true;
+      }
+    }
+    if (millis() - ultimoIntentoNtpMs > 600000UL) {
+      configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, "pool.ntp.org", "time.nist.gov");
+      ultimoIntentoNtpMs = millis();
+    }
     return;
   }
-  if (millis() - ultimoIntentoNtpMs > 600000UL) { configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, "pool.ntp.org", "time.nist.gov"); ultimoIntentoNtpMs = millis(); }
+
+  wifiConectado = false;
+
+  if (WiFi.status() == WL_IDLE_STATUS) return;
+
+  if (millis() - ultimoIntentoWifiMs > 30000UL) {
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.begin(SSID, PASSWORD);
+    ultimoIntentoWifiMs = millis();
+  }
 }
 
 void enviarDatosEspNow() {
