@@ -274,13 +274,13 @@ InfoCultivo calcularCultivo(int d, int m, int a) {
     prog = 0;
   } else if (tHoy < tFlor) {
     r.fase = "VEGETA"; r.colorFase = MI_VERDE;
-    ppmMin = 300; ppmMax = 450;
+    ppmMin = 300; ppmMax = 700;
     prog = (float)diasVida / max(1, diasVegetacion);
   } else {
     int diasFlor = (int)((tHoy - tFlor) / 86400);
     if (diasFlor <= 47) {
       r.fase = "FLOR T"; r.colorFase = MI_AMARILLO;
-      ppmMin = 500; ppmMax = 1100;
+      ppmMin = 750; ppmMax = 1100;
       prog = (float)diasFlor / 47.0f;
     } else {
       r.fase = "FLOR A"; r.colorFase = MI_ROJO;
@@ -441,8 +441,8 @@ StatsVivas calcularStatsVivas(const InfoCultivo &cult) {
   s.agua = cult.tocaRegar ? 30 : 92;
   s.felicidad = cult.tocaRegar ? 50 : 88;
   bool ppmOk = (!strcmp(cult.fase, "PLANTULA") && cult.ppm >= 100 && cult.ppm <= 250) ||
-               (!strcmp(cult.fase, "VEGETA") && cult.ppm >= 300 && cult.ppm <= 450) ||
-               (!strcmp(cult.fase, "FLOR T") && cult.ppm >= 500 && cult.ppm <= 1100) ||
+               (!strcmp(cult.fase, "VEGETA") && cult.ppm >= 300 && cult.ppm <= 700) ||
+               (!strcmp(cult.fase, "FLOR T") && cult.ppm >= 750 && cult.ppm <= 1100) ||
                (!strcmp(cult.fase, "FLOR A") && cult.ppm >= 1200 && cult.ppm <= 1600);
   s.salud = ppmOk ? 100 : 62;
   s.energia = (!cult.tocaRegar && !cult.tocaFertilizar) ? 90 : 60;
